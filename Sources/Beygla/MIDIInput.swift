@@ -4,10 +4,17 @@ import Foundation
 
 /// CoreMIDI note-on listener.
 ///
-/// Every connected source is joined at once, so a controller plugged in while
-/// the app is running still works without the user hunting for a device menu.
+/// By default every source is joined at once, so a controller plugged in while
+/// the app is running works without anyone hunting through a device menu. Pick
+/// one from `availableSources` when several devices are connected and only one
+/// of them should drive the mosh.
 @MainActor
 public final class MIDIInput: ObservableObject {
+    public struct Source: Identifiable, Hashable {
+        public var id: MIDIUniqueID
+        public var name: String
+    }
+
     public struct Note: Identifiable, Hashable {
         public var id = UUID()
         public var number: Int
@@ -17,7 +24,11 @@ public final class MIDIInput: ObservableObject {
     }
 
     @Published public private(set) var isRunning = false
-    @Published public private(set) var sourceNames: [String] = []
+    @Published public private(set) var availableSources: [Source] = []
+    /// nil listens to every source; set it to bind one device.
+    @Published public var selectedSourceID: MIDIUniqueID? = nil {
+        didSet { if isRunning { connectSources() } }
+    }
     @Published public private(set) var lastNote: Note?
     @Published public private(set) var errorText: String?
 
@@ -26,6 +37,7 @@ public final class MIDIInput: ObservableObject {
 
     private var client = MIDIClientRef()
     private var port = MIDIPortRef()
+    private var connected: [MIDIEndpointRef] = []
 
     public init() {}
 
@@ -37,7 +49,7 @@ public final class MIDIInput: ObservableObject {
             // still ends up connected.
             let type = notification.pointee.messageID
             if type == .msgObjectAdded || type == .msgObjectRemoved {
-                Task { @MainActor in self?.connectAllSources() }
+                Task { @MainActor in self?.connectSources() }
             }
         }
         guard status == noErr else {
@@ -65,29 +77,56 @@ public final class MIDIInput: ObservableObject {
 
         isRunning = true
         errorText = nil
-        connectAllSources()
+        connectSources()
     }
 
     public func stop() {
         guard isRunning else { return }
+        for e in connected { MIDIPortDisconnectSource(port, e) }
+        connected = []
         MIDIPortDispose(port)
         MIDIClientDispose(client)
         isRunning = false
-        sourceNames = []
+        availableSources = []
     }
 
-    private func connectAllSources() {
-        var names: [String] = []
+    /// Re-scan the endpoints and connect either all of them or just the one
+    /// that is selected. Called on start, on every device add/remove, and
+    /// whenever the selection changes.
+    private func connectSources() {
+        for e in connected { MIDIPortDisconnectSource(port, e) }
+        connected = []
+
+        var found: [Source] = []
         for i in 0 ..< MIDIGetNumberOfSources() {
-            let src = MIDIGetSource(i)
-            MIDIPortConnectSource(port, src, nil)
+            let endpoint = MIDIGetSource(i)
+
+            var uid: MIDIUniqueID = 0
+            MIDIObjectGetIntegerProperty(endpoint, kMIDIPropertyUniqueID, &uid)
+
             var cf: Unmanaged<CFString>?
-            if MIDIObjectGetStringProperty(src, kMIDIPropertyDisplayName, &cf) == noErr,
-               let name = cf?.takeRetainedValue() as String? {
-                names.append(name)
+            let name: String
+            if MIDIObjectGetStringProperty(endpoint, kMIDIPropertyDisplayName, &cf) == noErr,
+               let n = cf?.takeRetainedValue() as String? {
+                name = n
+            } else {
+                name = "Source \(i + 1)"
+            }
+            found.append(Source(id: uid, name: name))
+
+            if selectedSourceID == nil || selectedSourceID == uid {
+                if MIDIPortConnectSource(port, endpoint, nil) == noErr {
+                    connected.append(endpoint)
+                }
             }
         }
-        sourceNames = names
+        availableSources = found
+
+        // A device that was selected and then unplugged falls back to listening
+        // to everything rather than silently hearing nothing.
+        if let sel = selectedSourceID, !found.contains(where: { $0.id == sel }) {
+            selectedSourceID = nil
+        }
     }
 
     /// Pull note-ons out of a UMP event list.

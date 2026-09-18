@@ -291,6 +291,9 @@ struct Selector<T: Hashable>: View {
     @Binding var selection: T
     var color: Color = Sungam.teal
     var vertical: Bool = false
+    /// A position that cannot be chosen yet recedes to tertiary ink rather than
+    /// disappearing — the panel keeps its shape.
+    var isEnabled: (T) -> Bool = { _ in true }
 
     var body: some View {
         let layout = vertical
@@ -300,14 +303,16 @@ struct Selector<T: Hashable>: View {
         layout {
             ForEach(Array(options.enumerated()), id: \.offset) { i, opt in
                 let active = opt.value == selection
+                let on = isEnabled(opt.value)
                 Text(opt.label.uppercased())
                     .font(Sungam.mono(Sungam.textBase))
                     .tracking(Sungam.textBase * Sungam.scale * 0.02)
-                    .foregroundStyle(active ? Sungam.paper : Sungam.ink62)
+                    .foregroundStyle(active ? Sungam.paper : (on ? Sungam.ink62 : Sungam.ink28))
                     .padding(.vertical, 5)
                     .padding(.horizontal, vertical ? 8 : 4)
                     .frame(maxWidth: .infinity)
                     .background(active ? color : Color.clear)
+                    .opacity(on ? 1 : 0.7)
                     .overlay(alignment: vertical ? .bottom : .trailing) {
                         if i < options.count - 1 {
                             Rectangle()
@@ -317,7 +322,7 @@ struct Selector<T: Hashable>: View {
                         }
                     }
                     .contentShape(Rectangle())
-                    .onTapGesture { selection = opt.value }
+                    .onTapGesture { if on { selection = opt.value } }
             }
         }
         .overlay(Rectangle().stroke(Sungam.ink28, lineWidth: Sungam.hairline))

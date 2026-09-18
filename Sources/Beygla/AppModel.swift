@@ -4,11 +4,22 @@ import Foundation
 import MoshCore
 import SwiftUI
 
+/// Which file the player currently holds. Kept explicit so the transport can
+/// say which one you are watching — comparing a mosh against its source is the
+/// whole job, and guessing is no use.
+public enum PlaybackSource: String, Hashable, Sendable {
+    case source, result
+}
+
 @MainActor
 public final class AppModel: ObservableObject {
     // MARK: Source
 
     @Published public var videoURL: URL?
+    /// An audio file standing in for the video's own track. It drives the onset
+    /// analysis, plays back against the video, and is muxed into the render.
+    @Published public private(set) var audioURL: URL?
+    @Published public private(set) var playbackSource: PlaybackSource = .source
     @Published public var info: VideoInfo?
     @Published public var loadError: String?
 
@@ -21,7 +32,9 @@ public final class AppModel: ObservableObject {
 
     // MARK: Triggers
 
-    @Published public var triggerSource: TriggerSource = .audio
+    @Published public var triggerSource: TriggerSource = .audio {
+        didSet { syncMIDILifecycle() }
+    }
     @Published public var onsetSettings = OnsetSettings(sensitivity: 0.5, band: .low, holdOff: 0.12) {
         didSet {
             audioInput.settings = onsetSettings
@@ -66,11 +79,23 @@ public final class AppModel: ObservableObject {
     private var pcm: [Float] = []
     private var rawFlux: [Float] = []
     private var timeObserver: Any?
+    private var cancellables: Set<AnyCancellable> = []
     private var pipeline: RenderPipeline?
     private let sampleRate = 44100
 
     public init() {
         tool = FFmpegTool.locate(bundledIn: Bundle.main.resourceURL)
+
+        // AudioInput and MIDIInput publish their own state. Without forwarding
+        // it, the level meter and the device list would sit frozen: SwiftUI is
+        // watching AppModel, and nothing on AppModel changes when a nested
+        // object does.
+        audioInput.objectWillChange
+            .sink { [weak self] in self?.objectWillChange.send() }
+            .store(in: &cancellables)
+        midiInput.objectWillChange
+            .sink { [weak self] in self?.objectWillChange.send() }
+            .store(in: &cancellables)
 
         audioInput.onOnset = { [weak self] strength in
             self?.recordLiveHit(strength: strength, source: .audio, note: nil)
@@ -113,16 +138,30 @@ public final class AppModel: ObservableObject {
             return
         }
 
-        player.replaceCurrentItem(with: AVPlayerItem(url: url))
-        player.seek(to: .zero)
+        showPlayback(.source, preserveTime: false)
         Task { await analyseTrack() }
     }
+
+    /// Point the analysis and the render at a different audio file. Passing nil
+    /// hands both back to the video's own track.
+    public func loadAudio(url: URL?) {
+        audioURL = url
+        previewURL = nil
+        lastReport = nil
+        showPlayback(.source, preserveTime: true)
+        Task { await analyseTrack() }
+    }
+
+    /// The file the onset detector listens to: the override when there is one.
+    private var analysisSource: URL? { audioURL ?? videoURL }
 
     /// Decode the source audio once, then keep the flux curve around so moving
     /// the sensitivity slider is instant.
     public func analyseTrack() async {
-        guard let tool, let url = videoURL, info?.hasAudio == true else {
+        guard let tool, let url = analysisSource,
+              audioURL != nil || info?.hasAudio == true else {
             envelope = []; fluxCurve = []; rawFlux = []; pcm = []
+            events.removeAll { $0.source == .audio }
             return
         }
         analysing = true
@@ -174,6 +213,16 @@ public final class AppModel: ObservableObject {
             if triggerSource == .midi { midiInput.start() }
         } else {
             audioInput.stop()
+            // The MIDI client stays open while the MIDI tab is showing, so the
+            // device list and Learn keep working between takes.
+            if triggerSource != .midi { midiInput.stop() }
+        }
+    }
+
+    private func syncMIDILifecycle() {
+        if triggerSource == .midi {
+            midiInput.start()
+        } else if !isArmed {
             midiInput.stop()
         }
     }
@@ -222,6 +271,7 @@ public final class AppModel: ObservableObject {
         renderStage = RenderStage.probing.rawValue
 
         var request = RenderRequest(input: url, output: output, events: events, rules: rules)
+        request.audioSource = audioURL
         request.settings = moshSettings
         // A preview trades resolution for turnaround; the mosh itself is
         // identical, so what you see is what the full render will do.
@@ -244,6 +294,10 @@ public final class AppModel: ObservableObject {
                     self.lastReport = report
                     self.previewURL = output
                     self.renderStage = RenderStage.done.rawValue
+                    // Show the thing that was just made. Rendering and then
+                    // leaving the original on screen is how the first build
+                    // managed to look like it had done nothing.
+                    self.showPlayback(.result)
                 }
             } catch {
                 await MainActor.run {
@@ -260,17 +314,64 @@ public final class AppModel: ObservableObject {
         pipeline?.cancel()
     }
 
-    public func playPreview() {
-        guard let url = previewURL else { return }
-        player.replaceCurrentItem(with: AVPlayerItem(url: url))
-        player.seek(to: .zero)
-        player.play()
+    /// Swap what the player is holding, keeping the playhead where it is so the
+    /// same moment can be compared before and after.
+    public func showPlayback(_ source: PlaybackSource, preserveTime: Bool = true) {
+        let resume = isPlaying
+        let at = preserveTime ? currentTime : 0
+
+        Task {
+            let item: AVPlayerItem?
+            switch source {
+            case .source: item = await makeSourceItem()
+            case .result: item = previewURL.map { AVPlayerItem(url: $0) }
+            }
+            guard let item else { return }
+
+            playbackSource = source
+            player.replaceCurrentItem(with: item)
+            await player.seek(to: CMTime(seconds: max(0, at), preferredTimescale: 600),
+                              toleranceBefore: .zero, toleranceAfter: .zero)
+            if resume { player.play() }
+        }
     }
 
-    public func playSource() {
-        guard let url = videoURL else { return }
-        player.replaceCurrentItem(with: AVPlayerItem(url: url))
-        player.seek(to: .zero)
+    /// The source as you are cutting it: the video's picture, with the override
+    /// audio in place of its own track when one is loaded. Built as a
+    /// composition so the two play together without rendering anything.
+    private func makeSourceItem() async -> AVPlayerItem? {
+        guard let videoURL else { return nil }
+        guard let audioURL else { return AVPlayerItem(url: videoURL) }
+
+        let videoAsset = AVURLAsset(url: videoURL)
+        let audioAsset = AVURLAsset(url: audioURL)
+        do {
+            let videoDuration = try await videoAsset.load(.duration)
+            guard let videoTrack = try await videoAsset.loadTracks(withMediaType: .video).first
+            else { return AVPlayerItem(url: videoURL) }
+
+            let composition = AVMutableComposition()
+            if let track = composition.addMutableTrack(
+                withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid) {
+                try track.insertTimeRange(CMTimeRange(start: .zero, duration: videoDuration),
+                                          of: videoTrack, at: .zero)
+                track.preferredTransform = try await videoTrack.load(.preferredTransform)
+            }
+
+            // Clamp to the picture: a track longer than the clip would stretch
+            // the timeline past the frames that exist.
+            if let audioTrack = try await audioAsset.loadTracks(withMediaType: .audio).first,
+               let track = composition.addMutableTrack(
+                withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid) {
+                let audioDuration = try await audioAsset.load(.duration)
+                let span = CMTimeMinimum(videoDuration, audioDuration)
+                try track.insertTimeRange(CMTimeRange(start: .zero, duration: span),
+                                          of: audioTrack, at: .zero)
+            }
+            return AVPlayerItem(asset: composition)
+        } catch {
+            return AVPlayerItem(url: videoURL)
+        }
     }
 
     // MARK: - Drawing helpers

@@ -1,5 +1,8 @@
+import AppKit
+import CoreMIDI
 import MoshCore
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct Inspector: View {
     @EnvironmentObject var model: AppModel
@@ -7,6 +10,7 @@ struct Inspector: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 18) {
+                filesPanel
                 sourcePanel
                 if model.triggerSource == .audio { detectionPanel }
                 if model.triggerSource == .midi { midiPanel }
@@ -16,6 +20,72 @@ struct Inspector: View {
             .padding(16)
         }
         .background(Sungam.paper)
+    }
+
+    // MARK: Files — neutral ink
+    //
+    // The source files are the material, not a stage of the signal, so this
+    // panel takes no section colour. The palette stays reserved for what the
+    // signal actually does.
+
+    private var filesPanel: some View {
+        PanelFrame(title: "Source", color: Sungam.ink38) {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 8) {
+                    Text("VIDEO")
+                        .font(Sungam.mono(Sungam.text2xs))
+                        .tracking(Sungam.text2xs * Sungam.scale * 0.08)
+                        .foregroundStyle(Sungam.ink62)
+                        .frame(width: 42 * Sungam.scale, alignment: .leading)
+                    Text(model.videoURL?.lastPathComponent ?? "none")
+                        .font(Sungam.mono(Sungam.textSm))
+                        .foregroundStyle(model.videoURL == nil ? Sungam.ink38 : Sungam.ink85)
+                        .lineLimit(1).truncationMode(.middle)
+                    Spacer()
+                    LatchButton(label: "Load") { openVideo() }
+                }
+
+                Rectangle().fill(Sungam.ink13).frame(height: Sungam.hairline)
+
+                HStack(spacing: 8) {
+                    Text("AUDIO")
+                        .font(Sungam.mono(Sungam.text2xs))
+                        .tracking(Sungam.text2xs * Sungam.scale * 0.08)
+                        .foregroundStyle(Sungam.ink62)
+                        .frame(width: 42 * Sungam.scale, alignment: .leading)
+                    Text(model.audioURL?.lastPathComponent ?? "from video")
+                        .font(Sungam.mono(Sungam.textSm))
+                        .foregroundStyle(model.audioURL == nil ? Sungam.ink38 : Sungam.ink85)
+                        .lineLimit(1).truncationMode(.middle)
+                    Spacer()
+                    LatchButton(label: "Load") { openAudio() }
+                    LatchButton(label: "Clear", enabled: model.audioURL != nil) {
+                        model.loadAudio(url: nil)
+                    }
+                }
+
+                if model.audioURL != nil {
+                    Text("Overrides the video's own track — it drives detection, plays against the picture, and is muxed into the render.")
+                        .font(Sungam.mono(Sungam.text2xs))
+                        .foregroundStyle(Sungam.ink45)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+    }
+
+    private func openVideo() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.movie, .video, .mpeg4Movie, .quickTimeMovie]
+        panel.allowsMultipleSelection = false
+        if panel.runModal() == .OK, let url = panel.url { model.load(url: url) }
+    }
+
+    private func openAudio() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.audio, .mp3, .wav, .aiff, .mpeg4Audio]
+        panel.allowsMultipleSelection = false
+        if panel.runModal() == .OK, let url = panel.url { model.loadAudio(url: url) }
     }
 
     // MARK: Source — coral, the trigger path
@@ -133,32 +203,42 @@ struct Inspector: View {
 
     private var midiPanel: some View {
         PanelFrame(title: "MIDI", color: Sungam.steel) {
-            VStack(alignment: .leading, spacing: 8) {
-                if model.midiInput.isRunning {
-                    if model.midiInput.sourceNames.isEmpty {
-                        Text("No MIDI sources found.")
-                            .font(Sungam.mono(Sungam.textSm))
-                            .foregroundStyle(Sungam.ink38)
-                    } else {
-                        ForEach(model.midiInput.sourceNames, id: \.self) { name in
-                            HStack(spacing: 6) {
-                                Lamp(on: true, color: Sungam.steel, size: 6)
-                                Text(name)
-                                    .font(Sungam.mono(Sungam.textSm))
-                                    .foregroundStyle(Sungam.ink85)
-                            }
-                        }
-                    }
-                    if let n = model.midiInput.lastNote {
-                        LabelValue(label: "Last",
-                                   value: "\(n.number.midiNoteName)  \(n.number)  VEL \(n.velocity)  CH \(n.channel + 1)",
-                                   color: Sungam.steel, size: Sungam.textSm)
-                    }
+            VStack(alignment: .leading, spacing: 10) {
+                Text("INPUT DEVICE")
+                    .font(Sungam.mono(Sungam.text2xs))
+                    .tracking(Sungam.text2xs * Sungam.scale * 0.08)
+                    .foregroundStyle(Sungam.ink62)
+
+                if model.midiInput.availableSources.isEmpty {
+                    Text("No MIDI sources found. Connect a device and it appears here.")
+                        .font(Sungam.mono(Sungam.textSm))
+                        .foregroundStyle(Sungam.ink38)
+                        .fixedSize(horizontal: false, vertical: true)
                 } else {
-                    Text("Arm live capture to connect MIDI devices.")
+                    // Every position stays labelled, so the device list reads
+                    // top to bottom rather than hiding in a pop-up.
+                    Selector(options: [(MIDIUniqueID?.none, "All devices")]
+                                + model.midiInput.availableSources.map {
+                                    (MIDIUniqueID?.some($0.id), $0.name)
+                                },
+                             selection: Binding(
+                                get: { model.midiInput.selectedSourceID },
+                                set: { model.midiInput.selectedSourceID = $0 }
+                             ),
+                             color: Sungam.steel,
+                             vertical: true)
+                }
+
+                if let n = model.midiInput.lastNote {
+                    LabelValue(label: "Last",
+                               value: "\(n.number.midiNoteName)  \(n.number)  VEL \(n.velocity)  CH \(n.channel + 1)",
+                               color: Sungam.steel, size: Sungam.textSm)
+                } else if model.midiInput.isRunning {
+                    Text("Waiting for a note.")
                         .font(Sungam.mono(Sungam.textSm))
                         .foregroundStyle(Sungam.ink38)
                 }
+
                 if let e = model.midiInput.errorText {
                     Text(e).font(Sungam.mono(Sungam.text2xs)).foregroundStyle(Sungam.amber)
                 }

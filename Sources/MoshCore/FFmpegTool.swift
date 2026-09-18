@@ -177,7 +177,8 @@ public final class FFmpegTool: @unchecked Sendable {
     /// the presentation timeline; CFR output refills those gaps by repeating the
     /// last picture, which restores the exact original frame count and keeps the
     /// result locked to the original audio.
-    public func decodeMoshed(avi: URL, audioFrom: URL?, output: URL, frameRate: Double,
+    public func decodeMoshed(avi: URL, audioFrom: URL?, audioStart: Double = 0,
+                             output: URL, frameRate: Double,
                              crf: Int = 18, progress: ((Double) -> Void)? = nil) throws {
         var args = [
             "-y", "-hide_banner",
@@ -185,7 +186,10 @@ public final class FFmpegTool: @unchecked Sendable {
             "-err_detect", "ignore_err",
             "-i", avi.path,
         ]
-        if let a = audioFrom { args += ["-i", a.path] }
+        if let a = audioFrom {
+            if audioStart > 0 { args += ["-ss", String(audioStart)] }
+            args += ["-i", a.path]
+        }
 
         args += ["-map", "0:v:0"]
         if audioFrom != nil { args += ["-map", "1:a:0?"] }

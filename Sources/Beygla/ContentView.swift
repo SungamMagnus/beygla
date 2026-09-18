@@ -144,8 +144,15 @@ struct ContentView: View {
             Rectangle().fill(Sungam.ink18)
                 .frame(width: Sungam.hairline, height: 14)
 
-            LatchButton(label: "Source", enabled: model.videoURL != nil) { model.playSource() }
-            LatchButton(label: "Result", enabled: model.previewURL != nil) { model.playPreview() }
+            Selector(options: [(PlaybackSource.source, "Source"), (.result, "Result")],
+                     selection: Binding(
+                        get: { model.playbackSource },
+                        set: { model.showPlayback($0) }
+                     ),
+                     color: Sungam.steel,
+                     isEnabled: { $0 == .source ? model.videoURL != nil
+                                                : model.previewURL != nil })
+                .frame(width: 150)
 
             Spacer()
 

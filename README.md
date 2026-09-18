@@ -129,13 +129,19 @@ BEYGLA_BUNDLE_FFMPEG=1 ./build.sh
 
 ## Using it
 
-### Offline — sync to the clip's own audio
+### Offline — sync to a track
 
-1. Drop a video in.
+1. Drop a video in. To cut to something other than its own audio, load an
+   audio file in the **Source** panel: it drives the detection, plays back
+   against the picture, and is the track muxed into the render.
 2. Pick a band and set sensitivity. Ticks appear on the timeline as you drag.
 3. Add effect rules. The coloured bars under the waveform show exactly which
    frames each rule will rewrite.
 4. **Preview** renders at 640px for a fast look; **Render** does it full size.
+   Either one loads its result into the player when it finishes. The
+   **Source / Result** switch in the transport says which file you are
+   watching and keeps the playhead when you flip it, so the same moment can be
+   compared before and after.
 
 ### Live — perform the mosh
 
@@ -145,6 +151,12 @@ BEYGLA_BUNDLE_FFMPEG=1 ./build.sh
    is coming into your interface. Each hit is timestamped against the playhead
    and written to the timeline.
 4. Disarm, tidy up, render.
+
+The MIDI panel lists every connected source and listens to all of them by
+default; pick one to bind the mosh to a single controller. The list is live —
+a device plugged in mid-session appears on its own, and unplugging a selected
+device falls back to listening to everything rather than silently hearing
+nothing.
 
 Rules can be bound to a specific MIDI note, so one pad blooms and another
 stutters. Hit a pad, then press **Learn** on the rule.
@@ -158,7 +170,9 @@ in a render can be reproduced here:
 beyglactl info clip.mp4                    # geometry, keyframe layout, picture types
 beyglactl onsets clip.mp4 --band low       # what the detector hears
 beyglactl render clip.mp4 out.mp4 \
-    --band low --effect bloom --dur 0.4  # render
+    --band low --effect bloom --dur 0.4    # render
+beyglactl render clip.mp4 out.mp4 \
+    --audio track.wav --effect glide       # cut the clip to a separate track
 ```
 
 ---

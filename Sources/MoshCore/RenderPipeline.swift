@@ -3,6 +3,10 @@ import Foundation
 public struct RenderRequest: Sendable {
     public var input: URL
     public var output: URL
+    /// An audio file to use in place of the video's own track. It drives the
+    /// onset analysis upstream, and it is the track muxed into the render, so
+    /// what you cut to is what you hear.
+    public var audioSource: URL?
     public var events: [TriggerEvent]
     public var rules: [MoshRule]
     public var settings: MoshSettings
@@ -15,11 +19,13 @@ public struct RenderRequest: Sendable {
     public var seed: UInt64
 
     public init(input: URL, output: URL, events: [TriggerEvent], rules: [MoshRule],
+                audioSource: URL? = nil,
                 settings: MoshSettings = .init(), seedKeyframesAtTriggers: Bool = true,
                 quality: Int = 3, previewWidth: Int? = nil,
                 trim: ClosedRange<Double>? = nil, seed: UInt64 = 0x4D05_4842) {
         self.input = input
         self.output = output
+        self.audioSource = audioSource
         self.events = events
         self.rules = rules
         self.settings = settings
@@ -130,10 +136,16 @@ public final class RenderPipeline: @unchecked Sendable {
         progress(.init(stage: .moshing, fraction: 1))
         try checkCancelled()
 
-        // 3. Decode back, re-attaching the untouched original audio.
-        //    CFR output is what refills the held frames and keeps sync.
+        // 3. Decode back, re-attaching the untouched audio — the override when
+        //    there is one, otherwise the video's own track. CFR output is what
+        //    refills the held frames and keeps sync.
+        let audio: URL? = request.audioSource ?? (info.hasAudio ? request.input : nil)
+        // A trim moves the video's start, and an external track is laid against
+        // the original timeline, so the audio has to be seeked by the same amount.
+        let audioStart = request.audioSource != nil ? (request.trim?.lowerBound ?? 0) : 0
         try tool.decodeMoshed(avi: moshedAVI,
-                              audioFrom: info.hasAudio ? request.input : nil,
+                              audioFrom: audio,
+                              audioStart: audioStart,
                               output: request.output,
                               frameRate: doc.frameRate) { f in
             progress(.init(stage: .decoding, fraction: f))

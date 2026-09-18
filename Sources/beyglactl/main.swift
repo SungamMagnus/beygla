@@ -38,6 +38,7 @@ func usage() -> Never {
           --dur 0.4                  effect length in seconds
           --width 640                downscale before moshing
           --quality 3                mpeg4 -q:v, higher = chunkier
+          --audio track.wav          use this audio instead of the video's own
           --purge                    strip every keyframe in the clip
     """)
     exit(1)
@@ -120,11 +121,14 @@ do {
         let width = option("width").flatMap { Int($0) }
         let quality = option("quality").flatMap { Int($0) } ?? 3
         let purge = flag("purge")
+        let audioOverride = option("audio").map { URL(fileURLWithPath: $0) }
 
-        let pcm = try tool.extractPCM(from: input)
+        // The detector listens to whatever will end up on the render.
+        let pcm = try tool.extractPCM(from: audioOverride ?? input)
         let onsets = pcm.isEmpty ? [] :
             OnsetDetector.analyze(pcm: pcm, sampleRate: 44100, settings: onsetSettings)
-        print("detected \(onsets.count) onsets in the \(onsetSettings.band.rawValue) band")
+        print("detected \(onsets.count) onsets in the \(onsetSettings.band.rawValue) band"
+            + (audioOverride.map { " of \($0.lastPathComponent)" } ?? ""))
 
         let events = onsets.map {
             TriggerEvent(time: $0.time, strength: $0.strength, source: .audio,
@@ -134,6 +138,7 @@ do {
                               duration: duration)]
 
         var request = RenderRequest(input: input, output: output, events: events, rules: rules)
+        request.audioSource = audioOverride
         request.settings = MoshSettings(purgeAllKeyframes: purge)
         request.quality = quality
         request.previewWidth = width
