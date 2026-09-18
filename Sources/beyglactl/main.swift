@@ -23,15 +23,15 @@ final class StageReporter: @unchecked Sendable {
 
 func usage() -> Never {
     print("""
-    moshctl — Moshbox command line
+    beyglactl — Beygla command line
 
-      moshctl info <video>
+      beyglactl info <video>
           Show stream geometry and keyframe layout.
 
-      moshctl onsets <media> [--band low|mid|high|full] [--sens 0.5]
+      beyglactl onsets <media> [--band low|mid|high|full] [--sens 0.5]
           Print detected transients.
 
-      moshctl render <video> <output.mp4> [options]
+      beyglactl render <video> <output.mp4> [options]
           --band low|mid|high|full   which band drives triggers (default low)
           --sens 0.0-1.0             onset sensitivity (default 0.5)
           --effect bloom|glide|echo|stutter|reverse|shuffle|freeze
@@ -75,7 +75,7 @@ do {
             + "audio: \(info.hasAudio ? "yes" : "no")")
 
         let work = FileManager.default.temporaryDirectory
-            .appendingPathComponent("moshctl-\(UUID().uuidString).avi")
+            .appendingPathComponent("beyglactl-\(UUID().uuidString).avi")
         defer { try? FileManager.default.removeItem(at: work) }
         var opts = FFmpegTool.EncodeOptions()
         opts.width = 320

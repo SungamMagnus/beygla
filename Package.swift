@@ -2,16 +2,16 @@
 import PackageDescription
 
 let package = Package(
-    name: "Moshbox",
+    name: "Beygla",
     platforms: [.macOS(.v14)],
     products: [
         .library(name: "MoshCore", targets: ["MoshCore"]),
-        .executable(name: "Moshbox", targets: ["Moshbox"]),
-        .executable(name: "moshctl", targets: ["moshctl"]),
+        .executable(name: "Beygla", targets: ["Beygla"]),
+        .executable(name: "beyglactl", targets: ["beyglactl"]),
     ],
     targets: [
         .target(name: "MoshCore"),
-        .executableTarget(name: "Moshbox", dependencies: ["MoshCore"]),
-        .executableTarget(name: "moshctl", dependencies: ["MoshCore"]),
+        .executableTarget(name: "Beygla", dependencies: ["MoshCore"]),
+        .executableTarget(name: "beyglactl", dependencies: ["MoshCore"]),
     ]
 )

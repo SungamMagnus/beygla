@@ -1,4 +1,4 @@
-# Moshbox
+# Beygla
 
 A macOS datamosh editor whose effects are driven by **audio-in** and **MIDI-in**
 triggers, so the glitches land on the beat instead of wherever you happened to
@@ -11,7 +11,7 @@ Inspired by [supermosh](https://github.com/supermosh/supermosh.github.io) and
 
 ## What it does
 
-Load a clip. Moshbox finds the transients in its audio — or listens to a live
+Load a clip. Beygla finds the transients in its audio — or listens to a live
 input, or to a MIDI controller — and turns each hit into a **trigger**. Each
 trigger fires an **effect rule**, and each rule rewrites a span of compressed
 video frames. Then it renders.
@@ -47,7 +47,7 @@ source.mp4 ──ffmpeg──▶ raw.avi ──Swift byte surgery──▶ moshe
 **1. Encode.** `-c:v mpeg4 -bf 0 -g 999999 -sc_threshold 1000000000`. No
 B-frames (they reference in both directions and turn any mosh into mush), and
 no automatic keyframes, so the only keyframes in the stream are the ones
-Moshbox asked for — one per trigger, placed so `bloom` has something to strip.
+Beygla asked for — one per trigger, placed so `bloom` has something to strip.
 
 **2. Mosh.** Pure Swift, no library. The AVI is parsed as a RIFF tree, each
 `00dc` chunk in the `movi` list is classified by picking the
@@ -59,7 +59,7 @@ rewrite that array of frames. Then `idx1` is rebuilt and the frame counts in
 
 ### Why it stays in sync
 
-This is the part that makes Moshbox different from the tools that inspired it,
+This is the part that makes Beygla different from the tools that inspired it,
 and it drove most of the design.
 
 Every effect is **length-preserving**. An op only ever overwrites the frame
@@ -73,7 +73,7 @@ zero-length AVI chunk — does not work: the decoder emits no picture for it and
 the output comes up short. On an 8-second test clip, holding 30 frames turned
 240 frames into 210.
 
-What Moshbox writes instead is a synthesised **`vop_coded = 0` P-VOP**: a
+What Beygla writes instead is a synthesised **`vop_coded = 0` P-VOP**: a
 six-byte, fully legal MPEG-4 frame that means "this picture is exactly the
 previous one". Building it requires reading `vop_time_increment_resolution` out
 of the stream's VOL header, which is not byte-aligned, so `MPEG4Skip.swift`
@@ -118,11 +118,11 @@ Then:
 ./build.sh
 ```
 
-That produces `build/Moshbox.app` and `build/moshctl`. To make the app
+That produces `build/Beygla.app` and `build/beyglactl`. To make the app
 self-contained, bundle ffmpeg into it:
 
 ```bash
-MOSHBOX_BUNDLE_FFMPEG=1 ./build.sh
+BEYGLA_BUNDLE_FFMPEG=1 ./build.sh
 ```
 
 ---
@@ -155,9 +155,9 @@ The CLI shares every line of the actual moshing with the app, so anything odd
 in a render can be reproduced here:
 
 ```bash
-moshctl info clip.mp4                    # geometry, keyframe layout, picture types
-moshctl onsets clip.mp4 --band low       # what the detector hears
-moshctl render clip.mp4 out.mp4 \
+beyglactl info clip.mp4                    # geometry, keyframe layout, picture types
+beyglactl onsets clip.mp4 --band low       # what the detector hears
+beyglactl render clip.mp4 out.mp4 \
     --band low --effect bloom --dur 0.4  # render
 ```
 
@@ -166,7 +166,7 @@ moshctl render clip.mp4 out.mp4 \
 ## Layout
 
 ```
-Sources/MoshCore/          # no UI, no AppKit — all of it testable from moshctl
+Sources/MoshCore/          # no UI, no AppKit — all of it testable from beyglactl
   RIFF.swift               #   RIFF/AVI tree parse + serialise
   MPEG4.swift              #   VOP type classification
   MPEG4Skip.swift          #   VOL bit-parsing, skip-VOP synthesis
@@ -176,9 +176,59 @@ Sources/MoshCore/          # no UI, no AppKit — all of it testable from moshct
   Triggers.swift           #   events, rules, and compiling one into ops
   FFmpegTool.swift         #   encode / decode / probe / PCM extraction
   RenderPipeline.swift     #   the three stages, with progress and cancellation
-Sources/Moshbox/           # SwiftUI app
-Sources/moshctl/           # command line front end
+Sources/Beygla/            # SwiftUI app
+  SungamKit.swift          #   the design system, ported to SwiftUI
+Sources/beyglactl/           # command line front end
 ```
+
+---
+
+## Design
+
+Beygla is built on the
+[Sungam design system](https://github.com/SungamMagnus/sungam-design-system),
+which means the app is a panel, not a form. `SungamKit.swift` ports the
+system's primitives to SwiftUI: `PanelFrame`, `Knob`, `Latch`, `Selector`,
+`Lamp`, `SegmentMeter` and `Wordmark`.
+
+The system's rules are kept rather than approximated:
+
+- **Flat paper.** `#f0ece2` throughout, no gradients, no textures.
+- **No shadows.** A control reads by its outline and its arc.
+- **Square corners** everywhere.
+- **Hairline borders** at partial ink opacity, never a separate grey.
+- **One monospace face** at every size — Menlo, the same face JUCE's
+  `getDefaultMonospacedFontName()` returns. Panel tokens are sized for a
+  plug-in window, so they are scaled up by a single ratio rather than being
+  replaced by a second type ramp.
+- **No icons, anywhere.** Every indicator is geometric or typographic: a filled
+  or outlined square for a lamp, a filled or outlined rectangle for a latch,
+  plain text for everything else. There were seven SF Symbols in the first
+  build and there are none now.
+- **Knobs sweep 317.2°**, leaving the gap at the bottom where the pointer never
+  goes. Drag vertically; hold shift for a finer drag. Bipolar knobs — only
+  Offset — grow their arc from noon.
+
+### Colour is signal
+
+The system's central rule is that a hue means something and is never chosen to
+look nice. Each Sungam product picks its own assignment and then holds to it
+absolutely. Beygla's:
+
+| Hue | Means |
+|---|---|
+| **Coral** | The trigger path — everything that decides *when*. Onsets, the detection curve, audio triggers. |
+| **Teal** | The effect engine — everything that decides *what*. |
+| **Steel** | The render chain — everything after the ops are applied. MIDI triggers, stream settings, progress. |
+| **Violet** | Modulation, and only modulation: the four parameters that move another parameter (velocity, chance, jitter, offset). |
+| **Amber** | The live state, and nothing else. Armed, the input lamp, the top meter segment. |
+
+The seven effects are not seven colours. They fall into three families by what
+they do to the frame array, and each family takes one hue:
+
+- **Bloom** strips reference frames — coral, the primary transform.
+- **Glide, Echo, Stutter, Freeze** hold or repeat what is there — teal.
+- **Reverse, Shuffle** reorder what is there — steel.
 
 ---
 
@@ -194,5 +244,8 @@ Sources/moshctl/           # command line front end
 - **Single clip.** Supermosh's multi-clip transitions aren't in yet; the engine
   supports it (concatenate, force keyframes at the junctions, bloom them) but
   there's no UI for a clip list.
-- **No app icon**, and the bundle is ad-hoc signed — fine locally, but it needs a
-  Developer ID to hand to anyone else.
+- **No app icon.** The design system has no icon vocabulary and states outright
+  that no logo exists and none should be invented, so the app ships with the
+  wordmark and no mark.
+- **Ad-hoc signed.** Fine locally; it needs a Developer ID to hand to anyone
+  else.

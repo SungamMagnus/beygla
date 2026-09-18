@@ -32,7 +32,7 @@ public final class MIDIInput: ObservableObject {
     public func start() {
         guard !isRunning else { return }
 
-        var status = MIDIClientCreateWithBlock("Moshbox" as CFString, &client) { [weak self] notification in
+        var status = MIDIClientCreateWithBlock("Beygla" as CFString, &client) { [weak self] notification in
             // Devices coming and going: re-scan so a controller plugged in later
             // still ends up connected.
             let type = notification.pointee.messageID
@@ -46,7 +46,7 @@ public final class MIDIInput: ObservableObject {
         }
 
         status = MIDIInputPortCreateWithProtocol(
-            client, "Moshbox In" as CFString, ._1_0, &port
+            client, "Beygla In" as CFString, ._1_0, &port
         ) { [weak self] eventList, _ in
             let notes = Self.parse(eventList)
             guard !notes.isEmpty else { return }

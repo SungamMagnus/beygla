@@ -22,7 +22,7 @@ public enum FFmpegError: Error, LocalizedError {
         switch self {
         case .notInstalled:
             return "ffmpeg and ffprobe were not found. Install them with `brew install ffmpeg`, "
-                 + "or point Moshbox at them in Settings."
+                 + "or point Beygla at them in Settings."
         case .failed(let cmd, let status, let log):
             let tail = log.split(separator: "\n").suffix(12).joined(separator: "\n")
             return "ffmpeg \(cmd) failed (exit \(status)):\n\(tail)"
@@ -34,7 +34,7 @@ public enum FFmpegError: Error, LocalizedError {
 
 /// Thin wrapper over the ffmpeg/ffprobe binaries.
 ///
-/// Moshbox shells out rather than linking libav* because the moshing itself is
+/// Beygla shells out rather than linking libav* because the moshing itself is
 /// pure byte surgery — ffmpeg is only ever asked to do the two things it is
 /// unambiguously good at: produce a clean MPEG-4 elementary stream, and decode
 /// a deliberately broken one without giving up.

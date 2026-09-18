@@ -2,10 +2,10 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <key>CFBundleName</key>                 <string>Moshbox</string>
-    <key>CFBundleDisplayName</key>          <string>Moshbox</string>
-    <key>CFBundleExecutable</key>           <string>Moshbox</string>
-    <key>CFBundleIdentifier</key>           <string>com.moshbox.app</string>
+    <key>CFBundleName</key>                 <string>Beygla</string>
+    <key>CFBundleDisplayName</key>          <string>Beygla</string>
+    <key>CFBundleExecutable</key>           <string>Beygla</string>
+    <key>CFBundleIdentifier</key>           <string>com.sungam.beygla</string>
     <key>CFBundlePackageType</key>          <string>APPL</string>
     <key>CFBundleShortVersionString</key>   <string>0.1.0</string>
     <key>CFBundleVersion</key>              <string>1</string>
@@ -13,8 +13,8 @@
     <key>NSHighResolutionCapable</key>      <true/>
     <key>NSPrincipalClass</key>             <string>NSApplication</string>
     <key>NSMicrophoneUsageDescription</key>
-    <string>Moshbox listens to live audio input so transients in the music can trigger datamosh effects.</string>
+    <string>Beygla listens to live audio input so transients in the music can trigger datamosh effects.</string>
     <key>NSAppleEventsUsageDescription</key>
-    <string>Moshbox runs ffmpeg to encode and decode video.</string>
+    <string>Beygla runs ffmpeg to encode and decode video.</string>
 </dict>
 </plist>
