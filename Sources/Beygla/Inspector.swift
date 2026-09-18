@@ -328,9 +328,10 @@ struct RuleRow: View {
                     .tracking(Sungam.textBase * Sungam.scale * 0.06)
                     .foregroundStyle(rule.enabled ? Sungam.ink85 : Sungam.ink38)
 
-                Text(rule.kind.family)
+                Text(rule.kind.summary)
                     .font(Sungam.mono(Sungam.text2xs))
                     .foregroundStyle(Sungam.ink38)
+                    .lineLimit(1)
 
                 Spacer()
 
@@ -346,7 +347,9 @@ struct RuleRow: View {
                 Text(rule.kind.blurb)
                     .font(Sungam.mono(Sungam.text2xs))
                     .foregroundStyle(Sungam.ink55)
+                    .lineSpacing(3)
                     .fixedSize(horizontal: false, vertical: true)
+                    .padding(.bottom, 2)
 
                 Selector(options: TriggerSource.allCases.map { ($0, $0.displayName) },
                          selection: $rule.source, color: rule.kind.signalColor)

@@ -154,6 +154,16 @@ struct ContentView: View {
                                                 : model.previewURL != nil })
                 .frame(width: 150)
 
+            Text(model.playbackName)
+                .font(Sungam.mono(Sungam.text2xs))
+                .foregroundStyle(model.playbackSource == .result ? Sungam.steel : Sungam.ink45)
+                .lineLimit(1).truncationMode(.middle)
+                .frame(maxWidth: 180, alignment: .leading)
+
+            LatchButton(label: "Reveal", enabled: model.previewURL != nil) {
+                if let u = model.previewURL { NSWorkspace.shared.activateFileViewerSelecting([u]) }
+            }
+
             Spacer()
 
             LabelValue(label: "Triggers", value: "\(model.events.count)",
@@ -179,6 +189,9 @@ struct ContentView: View {
                 Text("Drag the timeline to scrub. Double-click to place a trigger at the playhead.")
                     .font(Sungam.mono(Sungam.textSm))
                     .foregroundStyle(Sungam.ink38)
+            }
+            if let e = model.playbackError {
+                Text(e).font(Sungam.mono(Sungam.textSm)).foregroundStyle(Sungam.amber)
             }
             Spacer()
         }

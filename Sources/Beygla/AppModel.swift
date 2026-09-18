@@ -20,6 +20,10 @@ public final class AppModel: ObservableObject {
     /// analysis, plays back against the video, and is muxed into the render.
     @Published public private(set) var audioURL: URL?
     @Published public private(set) var playbackSource: PlaybackSource = .source
+    /// The file the player is actually holding, named so the transport can say
+    /// so outright rather than leaving it to be inferred from the picture.
+    @Published public private(set) var playbackName: String = "—"
+    @Published public private(set) var playbackError: String?
     @Published public var info: VideoInfo?
     @Published public var loadError: String?
 
@@ -80,6 +84,7 @@ public final class AppModel: ObservableObject {
     private var rawFlux: [Float] = []
     private var timeObserver: Any?
     private var cancellables: Set<AnyCancellable> = []
+    private var statusObserver: AnyCancellable?
     private var pipeline: RenderPipeline?
     private let sampleRate = 44100
 
@@ -294,10 +299,13 @@ public final class AppModel: ObservableObject {
                     self.lastReport = report
                     self.previewURL = output
                     self.renderStage = RenderStage.done.rawValue
-                    // Show the thing that was just made. Rendering and then
-                    // leaving the original on screen is how the first build
-                    // managed to look like it had done nothing.
-                    self.showPlayback(.result)
+                    // Show the thing that was just made, from just before the
+                    // first trigger, and roll. Rendering and then leaving a
+                    // paused first frame on screen is how this managed to look
+                    // like it had done nothing twice over.
+                    self.showPlayback(.result,
+                                      startAt: self.firstInterestingTime,
+                                      autoPlay: true)
                 }
             } catch {
                 await MainActor.run {
@@ -314,26 +322,61 @@ public final class AppModel: ObservableObject {
         pipeline?.cancel()
     }
 
-    /// Swap what the player is holding, keeping the playhead where it is so the
-    /// same moment can be compared before and after.
-    public func showPlayback(_ source: PlaybackSource, preserveTime: Bool = true) {
-        let resume = isPlaying
-        let at = preserveTime ? currentTime : 0
+    /// Swap what the player is holding.
+    ///
+    /// `startAt` overrides the preserved playhead, and `autoPlay` starts it
+    /// rolling regardless of whether it was rolling before. Both matter after a
+    /// render: the first frame of a clip is its protected keyframe, so it is
+    /// byte-for-byte the same picture in the source and the result. Landing
+    /// there, paused, is indistinguishable from nothing having happened.
+    public func showPlayback(_ source: PlaybackSource, preserveTime: Bool = true,
+                             startAt: Double? = nil, autoPlay: Bool = false) {
+        let resume = autoPlay || isPlaying
+        let at = startAt ?? (preserveTime ? currentTime : 0)
 
         Task {
             let item: AVPlayerItem?
             switch source {
-            case .source: item = await makeSourceItem()
-            case .result: item = previewURL.map { AVPlayerItem(url: $0) }
+            case .source:
+                item = await makeSourceItem()
+                playbackName = audioURL == nil
+                    ? (videoURL?.lastPathComponent ?? "—")
+                    : "\(videoURL?.lastPathComponent ?? "—") + \(audioURL!.lastPathComponent)"
+            case .result:
+                item = previewURL.map { AVPlayerItem(url: $0) }
+                playbackName = previewURL?.lastPathComponent ?? "—"
             }
             guard let item else { return }
 
             playbackSource = source
+            playbackError = nil
             player.replaceCurrentItem(with: item)
+
+            // An item that cannot be read leaves the last picture on screen,
+            // which looks exactly like a swap that did not happen. Say so.
+            observeStatus(of: item)
+
             await player.seek(to: CMTime(seconds: max(0, at), preferredTimescale: 600),
                               toleranceBefore: .zero, toleranceAfter: .zero)
             if resume { player.play() }
         }
+    }
+
+    private func observeStatus(of item: AVPlayerItem) {
+        statusObserver = item.publisher(for: \.status)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] status in
+                guard status == .failed else { return }
+                self?.playbackError = item.error?.localizedDescription
+                    ?? "The player could not read this file."
+            }
+    }
+
+    /// Where to drop the playhead so a render is judged on a moment that
+    /// actually differs: just before the first trigger.
+    public var firstInterestingTime: Double {
+        guard let first = events.map(\.time).min() else { return 0 }
+        return max(0, first - 0.4)
     }
 
     /// The source as you are cutting it: the video's picture, with the override

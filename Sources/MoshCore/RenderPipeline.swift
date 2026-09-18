@@ -66,24 +66,36 @@ public enum RenderError: Error, LocalizedError {
 
 public final class RenderPipeline: @unchecked Sendable {
     private let tool: FFmpegTool
-    private let cancelled = NSLock()
-    private var _isCancelled = false
+    private let token = ProcessToken()
 
     public init(tool: FFmpegTool) { self.tool = tool }
 
-    public func cancel() {
-        cancelled.lock(); _isCancelled = true; cancelled.unlock()
-    }
+    /// Kills the running ffmpeg immediately rather than waiting for the current
+    /// stage to finish on its own.
+    public func cancel() { token.cancel() }
 
     private func checkCancelled() throws {
-        cancelled.lock(); let c = _isCancelled; cancelled.unlock()
-        if c { throw RenderError.cancelled }
+        if token.isCancelled { throw RenderError.cancelled }
     }
 
     /// Encode → mosh → decode.
     public func run(_ request: RenderRequest,
                     progress: @escaping @Sendable (RenderProgress) -> Void) throws -> RenderReport {
+        do {
+            return try execute(request, progress: progress)
+        } catch is CancellationError {
+            // A killed ffmpeg throws from deep in the stack. Callers only need
+            // to know the render was cancelled.
+            throw RenderError.cancelled
+        }
+    }
+
+    private func execute(_ request: RenderRequest,
+                         progress: @escaping @Sendable (RenderProgress) -> Void) throws -> RenderReport {
         let start = Date()
+        // A terminated ffmpeg throws CancellationError from deep in the stack;
+        // surface all of it as one cancellation the caller can ignore quietly.
+        defer { if token.isCancelled { try? FileManager.default.removeItem(at: request.output) } }
         progress(.init(stage: .probing, fraction: 0))
         let info = try tool.probe(request.input)
         try checkCancelled()
@@ -109,7 +121,8 @@ public final class RenderPipeline: @unchecked Sendable {
                 .sorted()
         }
 
-        try tool.encodeMoshable(input: request.input, output: rawAVI, options: opts) { f in
+        try tool.encodeMoshable(input: request.input, output: rawAVI, options: opts,
+                                token: token) { f in
             progress(.init(stage: .encoding, fraction: f))
         }
         try checkCancelled()
@@ -147,7 +160,8 @@ public final class RenderPipeline: @unchecked Sendable {
                               audioFrom: audio,
                               audioStart: audioStart,
                               output: request.output,
-                              frameRate: doc.frameRate) { f in
+                              frameRate: doc.frameRate,
+                              token: token) { f in
             progress(.init(stage: .decoding, fraction: f))
         }
 

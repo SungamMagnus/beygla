@@ -129,46 +129,72 @@ public enum OnsetDetector {
         return pickPeaks(flux: flux, sampleRate: sampleRate, settings: settings)
     }
 
+    /// Pick onsets out of a flux curve.
+    ///
+    /// Peaks are ranked by **prominence** — how far a local maximum stands above
+    /// the running median around it — and sensitivity selects what fraction of
+    /// that ranking to keep. Thresholding the flux directly, which is the
+    /// obvious approach, gives a knob that does nothing across most of its
+    /// travel: on sparse percussive material the local median sits near zero, so
+    /// a multiple of it is near zero too, and every candidate clears it at once.
+    /// Ranking makes the control monotonic over its whole range instead.
     public static func pickPeaks(flux: [Float], sampleRate: Int, settings: OnsetSettings) -> [Onset] {
         guard flux.count > 8 else { return [] }
 
         let secondsPerFrame = Double(hopSize) / Double(sampleRate)
-        // Median window of roughly a third of a second either side.
         let halfWin = max(4, Int(0.33 / secondsPerFrame))
-        // sensitivity 0 -> demanding (2.4x median), 1 -> permissive (1.02x).
-        let multiplier = Float(2.4 - 1.38 * max(0, min(1, settings.sensitivity)))
-
-        let peak = flux.max() ?? 1
+        let peak = flux.max() ?? 0
         guard peak > 0 else { return [] }
-        let floorLevel = peak * 0.02
 
-        var onsets: [Onset] = []
-        var lastTime = -Double.infinity
-
+        // 1. Every local maximum, with how far it rises above its neighbourhood.
+        var indices: [Int] = []
+        var prominences: [Float] = []
         for i in 1 ..< (flux.count - 1) {
             let v = flux[i]
-            guard v > flux[i - 1], v >= flux[i + 1], v > floorLevel else { continue }
-
+            guard v > flux[i - 1], v >= flux[i + 1], v > peak * 0.002 else { continue }
             let lo = max(0, i - halfWin)
             let hi = min(flux.count, i + halfWin)
             var neighbourhood = Array(flux[lo ..< hi])
             neighbourhood.sort()
-            let median = neighbourhood[neighbourhood.count / 2]
-            let threshold = median * multiplier + floorLevel
-            guard v > threshold else { continue }
-
-            // Report the centre of the analysis window, not its start: the
-            // window that first sees a transient begins up to one window ahead
-            // of it, and uncorrected that reads as a consistent early bias.
-            let time = (Double(i) * Double(hopSize) + Double(windowSize) / 2) / Double(sampleRate)
-            guard time - lastTime >= settings.holdOff else { continue }
-            lastTime = time
-
-            let strength = Double(min(1, (v - threshold) / max(peak - threshold, 1e-6)))
-            onsets.append(Onset(time: time, strength: strength))
+            let prominence = v - neighbourhood[neighbourhood.count / 2]
+            if prominence > 0 {
+                indices.append(i)
+                prominences.append(prominence)
+            }
         }
+        guard !prominences.isEmpty else { return [] }
 
-        return onsets
+        // 2. Keep the most prominent fraction. The curve is deliberately steep
+        //    at the bottom: the difference between "only the downbeats" and
+        //    "the backbeat too" deserves more of the knob than the difference
+        //    between "almost everything" and "everything".
+        let s = max(0, min(1, settings.sensitivity))
+        let keepFraction = 0.012 + 0.988 * pow(s, 1.7)
+        let ranked = prominences.sorted(by: >)
+        let cutIndex = min(ranked.count - 1,
+                           max(0, Int((Double(ranked.count) * keepFraction).rounded()) - 1))
+        // Widen the cut so it never falls between hits of near-equal strength.
+        // A steady four-to-the-floor has eight nearly identical kicks; a strict
+        // fraction would keep four of them and drop the rest arbitrarily, which
+        // is musically wrong however defensible the ranking is.
+        let cutoff = ranked[cutIndex] * 0.75
+        let strongest = ranked[0]
+
+        // 3. Hold-off, keeping the strongest hit in each window rather than
+        //    whichever one happened to arrive first.
+        var kept: [Onset] = []
+        for (n, i) in indices.enumerated() where prominences[n] >= cutoff {
+            let time = (Double(i) * Double(hopSize) + Double(windowSize) / 2) / Double(sampleRate)
+            let strength = Double(min(1, prominences[n] / max(strongest, 1e-6)))
+            if let last = kept.last, time - last.time < settings.holdOff {
+                if strength > last.strength {
+                    kept[kept.count - 1] = Onset(time: time, strength: strength)
+                }
+                continue
+            }
+            kept.append(Onset(time: time, strength: strength))
+        }
+        return kept
     }
 }
 
@@ -251,7 +277,8 @@ public final class LiveOnsetDetector {
             previousMagnitudes = magnitudes
             level = sum
 
-            let multiplier = Float(2.6 - 1.5 * max(0, min(1, settings.sensitivity)))
+            let s = max(0, min(1, settings.sensitivity))
+            let multiplier = Float(0.9 + 7.1 * (1 - s) * (1 - s))
             let threshold = average * multiplier
             if sum > threshold, average > 0,
                hostTime - lastFireTime >= settings.holdOff {

@@ -32,6 +32,48 @@ public enum FFmpegError: Error, LocalizedError {
     }
 }
 
+/// Holds whichever ffmpeg process is running right now so it can be killed.
+///
+/// Checking a cancellation flag between pipeline stages is not cancelling: the
+/// encode of a long clip is a single ffmpeg invocation that blocks for as long
+/// as it takes, and a flag checked after it finishes has cancelled nothing. The
+/// process itself has to be terminated.
+public final class ProcessToken: @unchecked Sendable {
+    private let lock = NSLock()
+    private var current: Process?
+    private var cancelled = false
+
+    public init() {}
+
+    public var isCancelled: Bool {
+        lock.lock(); defer { lock.unlock() }
+        return cancelled
+    }
+
+    public func cancel() {
+        lock.lock()
+        cancelled = true
+        let p = current
+        lock.unlock()
+        p?.terminate()
+    }
+
+    /// Take ownership of a process that is about to run. A token cancelled
+    /// before the process started kills it immediately rather than letting it
+    /// slip through the gap.
+    func adopt(_ p: Process) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        if cancelled { return false }
+        current = p
+        return true
+    }
+
+    func release() {
+        lock.lock(); current = nil; lock.unlock()
+    }
+}
+
 /// Thin wrapper over the ffmpeg/ffprobe binaries.
 ///
 /// Beygla shells out rather than linking libav* because the moshing itself is
@@ -135,6 +177,7 @@ public final class FFmpegTool: @unchecked Sendable {
     /// Encode to the one format that can actually be moshed: MPEG-4 Part 2 in
     /// AVI, no B-frames, no scene-change keyframes, video only.
     public func encodeMoshable(input: URL, output: URL, options: EncodeOptions,
+                               token: ProcessToken? = nil,
                                progress: ((Double) -> Void)? = nil) throws {
         var args = ["-y", "-hide_banner"]
         if let t = options.trim {
@@ -165,7 +208,7 @@ public final class FFmpegTool: @unchecked Sendable {
         }
         args.append(output.path)
 
-        try run(ffmpeg, args, progress: progress)
+        try run(ffmpeg, args, token: token, progress: progress)
     }
 
     // MARK: - Decode
@@ -178,8 +221,9 @@ public final class FFmpegTool: @unchecked Sendable {
     /// last picture, which restores the exact original frame count and keeps the
     /// result locked to the original audio.
     public func decodeMoshed(avi: URL, audioFrom: URL?, audioStart: Double = 0,
-                             output: URL, frameRate: Double,
-                             crf: Int = 18, progress: ((Double) -> Void)? = nil) throws {
+                             output: URL, frameRate: Double, crf: Int = 18,
+                             token: ProcessToken? = nil,
+                             progress: ((Double) -> Void)? = nil) throws {
         var args = [
             "-y", "-hide_banner",
             "-fflags", "+genpts",
@@ -206,7 +250,7 @@ public final class FFmpegTool: @unchecked Sendable {
         if audioFrom != nil { args += ["-c:a", "aac", "-b:a", "192k", "-shortest"] }
         args.append(output.path)
 
-        try run(ffmpeg, args, progress: progress)
+        try run(ffmpeg, args, token: token, progress: progress)
     }
 
     // MARK: - Audio
@@ -268,7 +312,8 @@ public final class FFmpegTool: @unchecked Sendable {
 
     /// Run ffmpeg, streaming stderr so `-progress`-free runs can still report
     /// roughly where they are by parsing `time=`.
-    func run(_ tool: URL, _ args: [String], progress: ((Double) -> Void)? = nil) throws {
+    func run(_ tool: URL, _ args: [String], token: ProcessToken? = nil,
+             progress: ((Double) -> Void)? = nil) throws {
         let p = Process()
         p.executableURL = tool
         p.arguments = args
@@ -279,6 +324,9 @@ public final class FFmpegTool: @unchecked Sendable {
         var log = ""
         var totalDuration: Double = 0
         let handle = err.fileHandleForReading
+
+        if let token, !token.adopt(p) { throw CancellationError() }
+        defer { token?.release() }
 
         try p.run()
         while true {
@@ -294,6 +342,10 @@ public final class FFmpegTool: @unchecked Sendable {
             }
         }
         p.waitUntilExit()
+
+        // A terminated process exits non-zero; that is a cancellation, not a
+        // failure, and must not surface as an error dialog.
+        if token?.isCancelled == true { throw CancellationError() }
 
         guard p.terminationStatus == 0 else {
             throw FFmpegError.failed(command: args.joined(separator: " "),

@@ -90,8 +90,21 @@ Verified across all seven effects at 30 fps (240 frames in → 240 out) and at
 ### Onset detection
 
 Spectral flux over a selectable band — low (kick), mid (snare), high (hats), or
-full range — with a threshold that adapts to a running median, so a quiet
-passage and a loud one are judged on their own terms.
+full range.
+
+Peaks are ranked by **prominence**, how far a local maximum stands above the
+running median around it, and sensitivity selects what fraction of that ranking
+to keep. Thresholding the flux directly is the obvious approach and it gives a
+knob that does nothing across most of its travel: on sparse percussive material
+the local median sits near zero, so a multiple of it is near zero too and every
+candidate clears it at once. Measured on a test signal with three amplitude
+tiers, the old curve moved between 31 and 32 onsets across the middle 60% of
+the knob; ranking spans 7 (the kicks alone) to 36 (every transient present).
+
+The cut is widened so it never falls between hits of near-equal strength. A
+steady four-to-the-floor has eight nearly identical kicks, and a strict
+fraction would keep four and drop the rest arbitrarily — defensible as ranking,
+wrong as music. Those eight now hold at seven across the whole knob.
 
 Detected times are reported at the **centre** of the analysis window rather than
 its start. Without that correction every onset reads about 12 ms early, which is
@@ -138,10 +151,18 @@ BEYGLA_BUNDLE_FFMPEG=1 ./build.sh
 3. Add effect rules. The coloured bars under the waveform show exactly which
    frames each rule will rewrite.
 4. **Preview** renders at 640px for a fast look; **Render** does it full size.
-   Either one loads its result into the player when it finishes. The
-   **Source / Result** switch in the transport says which file you are
-   watching and keeps the playhead when you flip it, so the same moment can be
-   compared before and after.
+   Either one loads its result into the player when it finishes, drops the
+   playhead just before the first trigger and plays. It does not land on frame
+   zero: the first frame of a clip is its protected keyframe, so it is the same
+   picture in the source and the result, and stopping there shows you nothing.
+   The **Source / Result** switch names the file it is holding and keeps the
+   playhead when you flip it, so the same moment can be compared both ways.
+
+**Cancel** kills the running ffmpeg outright. Checking a flag between pipeline
+stages is not cancelling — the encode of a long clip is one invocation that
+blocks for as long as it takes. On a 90-second 1080p clip whose full render
+takes 32 seconds, cancelling returns in under two, leaves no stray process and
+removes the partial file.
 
 ### Live — perform the mosh
 
@@ -173,6 +194,8 @@ beyglactl render clip.mp4 out.mp4 \
     --band low --effect bloom --dur 0.4    # render
 beyglactl render clip.mp4 out.mp4 \
     --audio track.wav --effect glide       # cut the clip to a separate track
+beyglactl render clip.mp4 out.mp4 \
+    --cancel-after 2                       # debug: prove cancelling kills ffmpeg
 ```
 
 ---

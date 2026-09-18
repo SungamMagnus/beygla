@@ -46,15 +46,56 @@ public enum MoshOpKind: String, Codable, CaseIterable, Identifiable, Sendable {
         }
     }
 
+    /// What the effect does to the bitstream, and what that looks like.
+    ///
+    /// A compressed stream has two kinds of frame: a keyframe, which is a whole
+    /// picture, and a delta frame, which carries only motion vectors and a small
+    /// correction — instructions for moving the previous picture's pixels around.
+    /// Every effect here works by lying about which pixels those instructions
+    /// were meant for.
     public var blurb: String {
         switch self {
-        case .bloom: return "Strips keyframes so new motion smears over old pixels"
-        case .glide: return "Repeats one delta frame — the image drifts"
-        case .echo: return "Loops a short run of delta frames"
-        case .stutter: return "Holds frames in steps, dropping the rest"
-        case .reverse: return "Runs the range's motion backwards"
-        case .shuffle: return "Scrambles the order of delta frames"
-        case .freeze: return "Hard freeze, no motion at all"
+        case .bloom:
+            return """
+            Deletes the keyframes inside the range. With no whole picture to             reset to, the incoming scene's motion vectors are applied to the             outgoing scene's pixels: the old image gets dragged around by the             new image's movement, holding its colours while taking on the             wrong shape. This is the classic smear, and it bites hardest at a             hard cut, where the two pictures have nothing in common.
+            """
+        case .glide:
+            return """
+            Picks the last delta frame before the range and re-applies that             same one for every frame in it. The decoder keeps shifting pixels             in the one direction that frame described, so the picture slides             steadily and smears into itself. It does not decay — a longer             range drifts further, and the image eventually pulls apart.
+            """
+        case .echo:
+            return """
+            Loops the first few delta frames of the range over and over. The             same short burst of motion replays on an ever-changing picture, so             the image churns in a cycle instead of drifting one way. Amount             sets how many frames are in the loop: low is a tight flutter, high             is a longer repeating phrase.
+            """
+        case .stutter:
+            return """
+            Keeps one frame in every few and replaces the rest with skip             frames, so the picture updates in steps rather than continuously.             The result is a hard rhythmic judder that holds dead still between             updates. Amount sets the step: higher holds longer and reads             slower and coarser.
+            """
+        case .reverse:
+            return """
+            Plays the range's delta frames back to front. Motion that was             pushing one way now pulls the other, against a picture that never             reset, so shapes crawl backwards through themselves. Any keyframe             that lands inside the reversed run is neutralised — left in, it             would snap the picture back and undo the effect.
+            """
+        case .shuffle:
+            return """
+            Randomly permutes the delta frames in the range, so each frame's             motion is applied at the wrong moment to the wrong picture. The             image tears into blocks that drift independently. Amount sets how             many swaps are made; the render is seeded, so the same project             always produces the same scramble.
+            """
+        case .freeze:
+            return """
+            Replaces every frame in the range with a skip frame, which tells             the decoder the picture is unchanged. Motion stops dead and             nothing smears — the one effect here that holds perfectly still.             Useful as a held beat between two moving ones.
+            """
+        }
+    }
+
+    /// The one-line version, for the collapsed row.
+    public var summary: String {
+        switch self {
+        case .bloom: return "New motion smeared over old pixels"
+        case .glide: return "One frame of motion, held and repeated"
+        case .echo: return "A short loop of motion, cycling"
+        case .stutter: return "Steps forward, holds still between"
+        case .reverse: return "The range's motion, backwards"
+        case .shuffle: return "Motion applied to the wrong frames"
+        case .freeze: return "Dead still, no motion at all"
         }
     }
 }

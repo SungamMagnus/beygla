@@ -40,6 +40,8 @@ func usage() -> Never {
           --quality 3                mpeg4 -q:v, higher = chunkier
           --audio track.wav          use this audio instead of the video's own
           --purge                    strip every keyframe in the clip
+          --cancel-after 1.5         debug: cancel mid-render, to check that
+                                     cancelling actually kills ffmpeg
     """)
     exit(1)
 }
@@ -144,7 +146,25 @@ do {
         request.previewWidth = width
 
         let reporter = StageReporter()
-        let report = try RenderPipeline(tool: tool).run(request) { p in
+        let pipeline = RenderPipeline(tool: tool)
+
+        if let after = option("cancel-after").flatMap({ Double($0) }) {
+            let started = Date()
+            DispatchQueue.global().asyncAfter(deadline: .now() + after) {
+                FileHandle.standardError.write(Data("cancelling…\n".utf8))
+                pipeline.cancel()
+            }
+            do {
+                _ = try pipeline.run(request) { p in reporter.note(p.stage) }
+                print("render finished before the cancel landed")
+            } catch {
+                print(String(format: "cancelled after %.2fs (asked at %.2fs)",
+                             Date().timeIntervalSince(started), after))
+            }
+            exit(0)
+        }
+
+        let report = try pipeline.run(request) { p in
             reporter.note(p.stage)
         }
         print("""
