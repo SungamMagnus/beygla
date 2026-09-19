@@ -173,6 +173,14 @@ removes the partial file.
    and written to the timeline.
 4. Disarm, tidy up, render.
 
+### By hand
+
+Double-click anywhere on the timeline to place a trigger at that point. A
+hand-placed trigger is an explicit instruction, so it fires **every** enabled
+effect regardless of what those effects are otherwise listening to — filtering
+it by source would mean a trigger you placed yourself drew a tick and then did
+nothing.
+
 The MIDI panel lists every connected source and listens to all of them by
 default; pick one to bind the mosh to a single controller. The list is live —
 a device plugged in mid-session appears on its own, and unplugging a selected
@@ -194,6 +202,8 @@ beyglactl render clip.mp4 out.mp4 \
     --band low --effect bloom --dur 0.4    # render
 beyglactl render clip.mp4 out.mp4 \
     --audio track.wav --effect glide       # cut the clip to a separate track
+beyglactl render clip.mp4 out.mp4 \
+    --at 1.5,3.0,4.5 --effect stutter      # place triggers by hand
 beyglactl render clip.mp4 out.mp4 \
     --cancel-after 2                       # debug: prove cancelling kills ffmpeg
 ```

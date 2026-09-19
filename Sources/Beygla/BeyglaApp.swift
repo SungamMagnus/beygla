@@ -11,11 +11,11 @@ struct BeyglaApp: App {
         Window("Beygla", id: "main") {
             ContentView()
                 .environmentObject(model)
-                .frame(minWidth: 1060, minHeight: 700)
+                .frame(minWidth: 1180, minHeight: 700)
                 .preferredColorScheme(.light)
                 .onAppear(perform: openLaunchArgument)
         }
-        .defaultSize(width: 1280, height: 860)
+        .defaultSize(width: 1420, height: 880)
         .commands {
             CommandGroup(replacing: .newItem) {
                 Button("Open Video…") { openVideo() }

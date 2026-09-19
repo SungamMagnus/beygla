@@ -49,16 +49,23 @@ struct TimelineView: View {
                 }
             }
             .contentShape(Rectangle())
-            .gesture(
-                DragGesture(minimumDistance: 0)
+            // Double-click places a trigger where you clicked, not at the
+            // playhead — the point of placing one by hand is choosing the spot.
+            .onTapGesture(count: 2) { location in
+                model.addManualTrigger(at: time(at: location.x, width: w))
+            }
+            .onTapGesture(count: 1) { location in
+                model.seek(to: time(at: location.x, width: w))
+            }
+            // A click is a zero-distance drag, so a drag that accepts one
+            // swallows every tap before either tap gesture can see it. Requiring
+            // a little movement lets clicks through and still scrubs.
+            .simultaneousGesture(
+                DragGesture(minimumDistance: 3)
                     .onChanged { g in
-                        let t = Double(g.location.x) / max(w, 1) * duration
-                        model.seek(to: min(max(0, t), duration))
+                        model.seek(to: time(at: g.location.x, width: w))
                     }
             )
-            .onTapGesture(count: 2) {
-                model.addManualTrigger(at: model.currentTime)
-            }
         }
         .frame(height: 160)
         .overlay(Rectangle().stroke(Sungam.ink28, lineWidth: Sungam.hairline))
@@ -66,6 +73,10 @@ struct TimelineView: View {
 
     private func x(_ time: Double, _ width: Double) -> Double {
         width * min(max(0, time / duration), 1)
+    }
+
+    private func time(at x: CGFloat, width: Double) -> Double {
+        min(max(0, Double(x) / max(width, 1) * duration), duration)
     }
 
     /// A one-second rule, so the eye can read where a hit lands without a

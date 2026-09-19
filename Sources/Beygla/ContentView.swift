@@ -14,7 +14,7 @@ struct ContentView: View {
             HStack(spacing: 0) {
                 stage
                 Rectangle().fill(Sungam.ink18).frame(width: Sungam.hairline)
-                Inspector().frame(width: 360)
+                Inspector().frame(width: 460)
             }
         }
         .background(Sungam.paper)
@@ -186,7 +186,7 @@ struct ContentView: View {
                 LabelValue(label: "Took", value: String(format: "%.1fs", r.duration),
                            color: Sungam.ink62, size: Sungam.textSm)
             } else {
-                Text("Drag the timeline to scrub. Double-click to place a trigger at the playhead.")
+                Text("Click the timeline to scrub. Double-click to place a trigger there — a hand-placed trigger fires every enabled effect.")
                     .font(Sungam.mono(Sungam.textSm))
                     .foregroundStyle(Sungam.ink38)
             }

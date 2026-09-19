@@ -87,7 +87,14 @@ public struct MoshRule: Identifiable, Codable, Hashable, Sendable {
     }
 
     public func matches(_ event: TriggerEvent) -> Bool {
-        guard enabled, source == event.source else { return false }
+        guard enabled else { return false }
+        // A hand-placed trigger is an explicit instruction — do this, here — so
+        // it fires every enabled effect regardless of what that effect is
+        // otherwise listening to. Filtering it by source would mean a trigger
+        // you placed yourself drew a tick on the timeline and then did nothing,
+        // which is not a filter anyone asked for.
+        if event.source == .manual { return true }
+        guard source == event.source else { return false }
         if let n = note, event.note != n { return false }
         if let b = band, let eb = event.band, b != eb { return false }
         return true

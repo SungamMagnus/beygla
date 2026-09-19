@@ -39,6 +39,8 @@ func usage() -> Never {
           --width 640                downscale before moshing
           --quality 3                mpeg4 -q:v, higher = chunkier
           --audio track.wav          use this audio instead of the video's own
+          --at 1.0,2.5,4.0           place triggers by hand at these seconds
+                                     instead of detecting them
           --purge                    strip every keyframe in the clip
           --cancel-after 1.5         debug: cancel mid-render, to check that
                                      cancelling actually kills ffmpeg
@@ -126,15 +128,24 @@ do {
         let audioOverride = option("audio").map { URL(fileURLWithPath: $0) }
 
         // The detector listens to whatever will end up on the render.
-        let pcm = try tool.extractPCM(from: audioOverride ?? input)
-        let onsets = pcm.isEmpty ? [] :
-            OnsetDetector.analyze(pcm: pcm, sampleRate: 44100, settings: onsetSettings)
-        print("detected \(onsets.count) onsets in the \(onsetSettings.band.rawValue) band"
-            + (audioOverride.map { " of \($0.lastPathComponent)" } ?? ""))
+        let manualTimes = option("at")?
+            .split(separator: ",")
+            .compactMap { Double($0.trimmingCharacters(in: .whitespaces)) }
 
-        let events = onsets.map {
-            TriggerEvent(time: $0.time, strength: $0.strength, source: .audio,
-                         band: onsetSettings.band)
+        let events: [TriggerEvent]
+        if let times = manualTimes {
+            events = times.map { TriggerEvent(time: $0, strength: 1.0, source: .manual) }
+            print("placed \(events.count) triggers by hand")
+        } else {
+            let pcm = try tool.extractPCM(from: audioOverride ?? input)
+            let onsets = pcm.isEmpty ? [] :
+                OnsetDetector.analyze(pcm: pcm, sampleRate: 44100, settings: onsetSettings)
+            print("detected \(onsets.count) onsets in the \(onsetSettings.band.rawValue) band"
+                + (audioOverride.map { " of \($0.lastPathComponent)" } ?? ""))
+            events = onsets.map {
+                TriggerEvent(time: $0.time, strength: $0.strength, source: .audio,
+                             band: onsetSettings.band)
+            }
         }
         let rules = [MoshRule(kind: kind, source: .audio, band: onsetSettings.band,
                               duration: duration)]

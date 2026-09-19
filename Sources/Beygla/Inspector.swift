@@ -66,8 +66,9 @@ struct Inspector: View {
 
                 if model.audioURL != nil {
                     Text("Overrides the video's own track — it drives detection, plays against the picture, and is muxed into the render.")
-                        .font(Sungam.mono(Sungam.text2xs))
+                        .font(Sungam.mono(Sungam.textSm))
                         .foregroundStyle(Sungam.ink45)
+                        .lineSpacing(3)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
@@ -100,7 +101,7 @@ struct Inspector: View {
                 Text(sourceBlurb)
                     .font(Sungam.mono(Sungam.textSm))
                     .foregroundStyle(Sungam.ink62)
-                    .lineSpacing(2)
+                    .lineSpacing(4)
                     .fixedSize(horizontal: false, vertical: true)
 
                 if model.triggerSource != .manual {
@@ -270,7 +271,7 @@ struct Inspector: View {
                     .tracking(Sungam.text2xs * Sungam.scale * 0.08)
                     .foregroundStyle(Sungam.ink45)
 
-                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 3),
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 4),
                           spacing: 6) {
                     ForEach(MoshOpKind.allCases) { kind in
                         LatchButton(label: kind.displayName, color: kind.signalColor) {
@@ -294,15 +295,17 @@ struct Inspector: View {
                 Latch(label: "Strip every keyframe",
                       on: $model.moshSettings.purgeAllKeyframes, color: Sungam.steel)
                 Text("The picture never resets — the whole clip becomes one continuous smear.")
-                    .font(Sungam.mono(Sungam.text2xs))
+                    .font(Sungam.mono(Sungam.textSm))
                     .foregroundStyle(Sungam.ink45)
+                    .lineSpacing(3)
                     .fixedSize(horizontal: false, vertical: true)
 
                 Latch(label: "Protect first frame",
                       on: $model.moshSettings.protectFirstFrame, color: Sungam.steel)
                 Text("Keeps the opening keyframe so the clip has something to start from.")
-                    .font(Sungam.mono(Sungam.text2xs))
+                    .font(Sungam.mono(Sungam.textSm))
                     .foregroundStyle(Sungam.ink45)
+                    .lineSpacing(3)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
@@ -345,11 +348,11 @@ struct RuleRow: View {
 
             if expanded {
                 Text(rule.kind.blurb)
-                    .font(Sungam.mono(Sungam.text2xs))
-                    .foregroundStyle(Sungam.ink55)
-                    .lineSpacing(3)
+                    .font(Sungam.mono(Sungam.textSm))
+                    .foregroundStyle(Sungam.ink70)
+                    .lineSpacing(4)
                     .fixedSize(horizontal: false, vertical: true)
-                    .padding(.bottom, 2)
+                    .padding(.vertical, 2)
 
                 Selector(options: TriggerSource.allCases.map { ($0, $0.displayName) },
                          selection: $rule.source, color: rule.kind.signalColor)
