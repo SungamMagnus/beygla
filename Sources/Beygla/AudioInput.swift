@@ -63,11 +63,22 @@ public final class AudioInput: ObservableObject {
         guard hwFormat.sampleRate > 0 else { return }
 
         let sampleRate = Int(hwFormat.sampleRate)
-        detector = LiveOnsetDetector(sampleRate: sampleRate, settings: settings)
+        let liveDetector = LiveOnsetDetector(sampleRate: sampleRate, settings: settings)
+        detector = liveDetector
         startHostTime = CACurrentMediaTime()
 
+        // AVAudioEngine calls this closure on its own real-time audio thread,
+        // never the main actor — no tap runs there, ever. The previous
+        // version reached for `self.detector` through `MainActor.assumeIsolated`,
+        // a promise that the current thread actually is the main actor's,
+        // which is simply false here; the runtime check backing that promise
+        // trapped the instant a live source was armed. `liveDetector` is
+        // captured directly instead, so the audio thread never touches a
+        // MainActor-isolated property at all. It stays safe to call from here
+        // because `LiveOnsetDetector` guards its one piece of state anything
+        // else can reach (`settings`) with its own lock, and everything else
+        // it holds is only ever touched from this same serial tap queue.
         input.installTap(onBus: 0, bufferSize: 1024, format: hwFormat) { [weak self] buffer, _ in
-            guard let self else { return }
             let mono = Self.monoSamples(from: buffer)
             guard !mono.isEmpty else { return }
 
@@ -75,8 +86,9 @@ public final class AudioInput: ObservableObject {
             for s in mono { peak = max(peak, abs(s)) }
 
             let now = CACurrentMediaTime()
-            let hit = self.detectorProcess(mono, at: now)
+            let hit = liveDetector.process(mono, hostTime: now)
 
+            guard let self else { return }
             Task { @MainActor in
                 // Decay the meter smoothly so it reads like a VU rather than flickering.
                 self.level = max(Double(peak), self.level * 0.82)
@@ -93,12 +105,6 @@ public final class AudioInput: ObservableObject {
         } catch {
             isRunning = false
         }
-    }
-
-    /// Runs on the audio thread; `detector` is only ever touched from there
-    /// once the tap is installed.
-    private nonisolated func detectorProcess(_ samples: [Float], at time: Double) -> Double? {
-        MainActor.assumeIsolated { detector }?.process(samples, hostTime: time)
     }
 
     static func monoSamples(from buffer: AVAudioPCMBuffer) -> [Float] {

@@ -203,8 +203,22 @@ public enum OnsetDetector {
 /// The offline detector can look ahead to compute a median; a live one cannot,
 /// so it tracks a decaying running average of flux instead and fires when the
 /// current frame jumps well clear of it.
-public final class LiveOnsetDetector {
-    public var settings: OnsetSettings
+public final class LiveOnsetDetector: @unchecked Sendable {
+    // `settings` is written from whichever thread owns the AudioInput object
+    // (the main actor, via a SwiftUI-driven Knob) and read every hop from
+    // AVAudioEngine's own real-time tap thread — a genuine cross-thread
+    // shared-mutable-state race, not a hypothetical one, since both sides
+    // fire independently of each other. A lock around a two-Double struct
+    // costs nothing worth measuring next to the FFT this class is already
+    // doing per hop, so it is simpler to just make the property safe than to
+    // reason about who is allowed to touch it when.
+    private let settingsLock = NSLock()
+    private var _settings: OnsetSettings
+    public var settings: OnsetSettings {
+        get { settingsLock.lock(); defer { settingsLock.unlock() }; return _settings }
+        set { settingsLock.lock(); _settings = newValue; settingsLock.unlock() }
+    }
+
     private let sampleRate: Int
     private var previousMagnitudes: [Float]
     private var average: Float = 0
@@ -221,7 +235,7 @@ public final class LiveOnsetDetector {
 
     public init(sampleRate: Int, settings: OnsetSettings) {
         self.sampleRate = sampleRate
-        self.settings = settings
+        self._settings = settings
         let n = OnsetDetector.windowSize
         log2n = vDSP_Length(log2(Double(n)))
         fftSetup = vDSP_create_fftsetup(log2n, FFTRadix(kFFTRadix2))
