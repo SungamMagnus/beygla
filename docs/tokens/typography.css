@@ -1,0 +1,29 @@
+/* Sungam is set entirely in the system monospace stack — the same font a
+   JUCE plug-in gets from getDefaultMonospacedFontName(). No display face, no
+   text face: one face for labels, values, wordmarks and body copy alike,
+   because the panel is a spec sheet, not a poster. */
+:root{
+  --font-mono:Menlo,Monaco,"DejaVu Sans Mono","Courier New",monospace;
+
+  /* Panels run tiny — a control label is rarely above 9px in a plug-in
+     window. On screen surfaces (docs, this design system) scale the same
+     ratios up; never introduce a second family. */
+  --text-2xs:7.5px;
+  --text-xs:8px;
+  --text-sm:8.5px;
+  --text-base:9.5px;
+  --text-md:10.5px;
+  --text-lg:13px;
+  --text-xl:16px;
+  --text-2xl:22px;
+
+  --weight-regular:400;
+  --weight-bold:700;
+
+  --tracking-normal:0;
+  --tracking-wide:.05em;
+  --tracking-wordmark:.28em;   /* letter-spaced caps — the wordmark treatment */
+
+  --line-tight:1; /* @kind other */
+  --line-normal:1.4; /* @kind other */
+}

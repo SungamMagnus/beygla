@@ -1,0 +1,132 @@
+/* Beygla — site styles.
+   The tokens in tokens/ are the Sungam design system verbatim. Panel tokens are
+   sized for a plug-in window where a label sits around 9px; a web page is a
+   bigger surface, so the ramp below scales the same ratios up rather than
+   introducing a second one. Everything else here is the system's rules applied:
+   flat paper, no shadows, square corners, hairline borders at partial ink
+   opacity, one monospace face, and no icons anywhere. */
+
+:root{
+  --w-2xs:10px; --w-xs:11px; --w-sm:12px;  --w-base:13px;
+  --w-md:15px;  --w-lg:18px; --w-xl:22px;  --w-2xl:30px; --w-3xl:46px;
+  --gutter:16px;
+}
+
+*{box-sizing:border-box}
+
+html{-webkit-text-size-adjust:100%}
+
+body{
+  margin:0;
+  background:var(--paper);
+  color:var(--ink);
+  font-family:var(--font-mono);
+  font-size:var(--w-base);
+  line-height:1.65;
+}
+
+.wrap{max-width:940px;margin:0 auto;padding:0 var(--gutter)}
+
+/* ── Wordmark ─────────────────────────────────────────────────────────── */
+.wm{font-weight:700;letter-spacing:.28em;text-transform:uppercase;display:inline-block}
+
+/* ── Masthead ─────────────────────────────────────────────────────────── */
+header{border-bottom:1px solid var(--ink-13);padding:22px 0}
+.masthead{display:flex;align-items:baseline;gap:16px;flex-wrap:wrap}
+.masthead .name{font-size:var(--w-xl);color:var(--ink)}
+.masthead .role{font-size:var(--w-xs);letter-spacing:.1em;text-transform:uppercase;color:var(--ink-45)}
+.masthead .spacer{flex:1}
+.masthead a{font-size:var(--w-xs);color:var(--ink-62);text-decoration:none;border-bottom:1px solid var(--ink-22)}
+.masthead a:hover{color:var(--ink);border-bottom-color:var(--ink)}
+
+/* ── Hero ─────────────────────────────────────────────────────────────── */
+.hero{padding:56px 0 44px}
+.hero h1{
+  font-size:var(--w-3xl);font-weight:700;letter-spacing:.28em;text-transform:uppercase;
+  margin:0 0 20px;line-height:1.1;color:var(--ink);
+}
+.lede{font-size:var(--w-md);max-width:64ch;margin:0 0 8px;color:var(--ink-85)}
+.sub{font-size:var(--w-base);max-width:64ch;margin:0 0 28px;color:var(--ink-62)}
+
+/* ── Latch: the system's button, filled or outlined, never rounded ────── */
+.latch{
+  display:inline-block;padding:11px 20px;
+  font-size:var(--w-xs);letter-spacing:.08em;text-transform:uppercase;
+  text-decoration:none;border:1.2px solid var(--steel);
+  background:var(--steel);color:var(--paper);
+}
+.latch:hover{background:var(--ink);border-color:var(--ink)}
+.latch.ghost{background:transparent;color:var(--ink-62);border-color:var(--ink-28)}
+.latch.ghost:hover{background:transparent;color:var(--ink);border-color:var(--ink)}
+.buttons{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:14px}
+.meta{font-size:var(--w-2xs);color:var(--ink-45);letter-spacing:.04em}
+
+/* ── PanelFrame: title inset into the rule, not captioned above it ────── */
+.panel{position:relative;border:1px solid var(--ink-22);padding:30px 24px 24px;margin:0 0 40px}
+.panel > .title{
+  position:absolute;top:-8px;left:16px;background:var(--paper);padding:0 8px;
+  font-size:var(--w-xs);letter-spacing:.12em;text-transform:uppercase;color:var(--ink-55);
+}
+.panel.coral{border-color:var(--coral)} .panel.coral > .title{color:var(--coral)}
+.panel.teal{border-color:var(--teal)}   .panel.teal  > .title{color:var(--teal)}
+.panel.steel{border-color:var(--steel)} .panel.steel > .title{color:var(--steel)}
+
+.panel p{margin:0 0 14px;max-width:72ch;color:var(--ink-78)}
+.panel p:last-child{margin-bottom:0}
+.panel strong{font-weight:700;color:var(--ink)}
+
+/* ── Effects ──────────────────────────────────────────────────────────── */
+.effects{display:grid;grid-template-columns:repeat(2,1fr);gap:1px;background:var(--ink-13);
+         border:1px solid var(--ink-13)}
+.effect{background:var(--paper);padding:18px 18px 20px}
+.effect .head{display:flex;align-items:center;gap:9px;margin-bottom:9px}
+/* A lamp is a small square. There is no icon system and no icons. */
+.effect .lamp{width:9px;height:9px;flex:none}
+.effect .nm{font-size:var(--w-sm);font-weight:700;letter-spacing:.1em;text-transform:uppercase}
+.effect .fam{font-size:var(--w-2xs);color:var(--ink-38);letter-spacing:.04em;margin-left:auto}
+.effect p{margin:0;font-size:var(--w-sm);color:var(--ink-70);line-height:1.6}
+
+/* ── Measured figures ─────────────────────────────────────────────────── */
+.figures{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--ink-13);
+         border:1px solid var(--ink-13);margin:4px 0 0}
+.fig{background:var(--paper);padding:16px 18px}
+.fig .n{font-size:var(--w-lg);font-weight:700;color:var(--steel);display:block;line-height:1.3}
+.fig .l{font-size:var(--w-2xs);color:var(--ink-55);letter-spacing:.06em;text-transform:uppercase}
+
+/* ── Key/value rows ───────────────────────────────────────────────────── */
+.rows{border-top:1px solid var(--ink-13)}
+.row{display:flex;gap:16px;padding:11px 0;border-bottom:1px solid var(--ink-13);align-items:baseline}
+.row .k{flex:0 0 132px;font-size:var(--w-2xs);letter-spacing:.08em;text-transform:uppercase;color:var(--ink-55)}
+.row .v{flex:1;color:var(--ink-78);font-size:var(--w-sm)}
+
+code,pre{font-family:var(--font-mono)}
+pre{background:transparent;border:1px solid var(--ink-13);padding:13px 15px;overflow-x:auto;
+    font-size:var(--w-sm);color:var(--ink-85);margin:0 0 14px}
+code{font-size:.94em;color:var(--ink)}
+p code{border-bottom:1px solid var(--ink-18)}
+
+/* The circuit is 940 wide and its labels are set at 11px. Scaled to a phone
+   it becomes unreadable, so below that width it scrolls sideways at a legible
+   size instead of shrinking. */
+.diagram-scroll{overflow-x:auto;margin:2px 0 6px;-webkit-overflow-scrolling:touch}
+.diagram{width:100%;min-width:680px;height:auto;display:block}
+.caption{font-size:var(--w-2xs);color:var(--ink-45);letter-spacing:.04em}
+
+footer{border-top:1px solid var(--ink-13);padding:26px 0 44px;margin-top:20px;
+       font-size:var(--w-2xs);color:var(--ink-45);letter-spacing:.04em}
+footer a{color:var(--ink-62);text-decoration:none;border-bottom:1px solid var(--ink-22)}
+footer a:hover{color:var(--ink)}
+footer .line{display:flex;gap:18px;flex-wrap:wrap}
+
+@media (max-width:720px){
+  :root{--w-3xl:30px;--w-2xl:22px}
+  /* Keep the two links together on their own line rather than letting one
+     dangle under the wordmark. */
+  .masthead .spacer{flex:0 0 100%;height:0}
+  .masthead{gap:10px 16px}
+  .hero{padding:38px 0 32px}
+  .effects,.figures{grid-template-columns:1fr}
+  .row{flex-direction:column;gap:3px}
+  .row .k{flex:none}
+  .panel{padding:28px 16px 20px}
+}

@@ -1,0 +1,367 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Beygla — datamosh editor for macOS</title>
+<meta name="description" content="A macOS datamosh editor whose effects are driven by audio-in and MIDI-in triggers, so the glitches land on the beat.">
+<meta property="og:title" content="Beygla">
+<meta property="og:description" content="Datamosh editor for macOS. Effects triggered by audio onsets or MIDI note-ons, length-preserving so the render stays locked to the track.">
+<meta property="og:type" content="website">
+<link rel="stylesheet" href="styles.css">
+<link rel="stylesheet" href="site.css">
+</head>
+<body>
+
+<header>
+  <div class="wrap masthead">
+    <span class="wm name">Beygla</span>
+    <span class="role">Datamosh editor</span>
+    <span class="spacer"></span>
+    <a href="https://github.com/SungamMagnus/beygla">Source</a>
+    <a href="https://github.com/SungamMagnus/beygla/releases/latest">Releases</a>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <section class="hero">
+    <h1>Beygla</h1>
+    <p class="lede">
+      A datamosh editor for macOS whose effects are driven by audio-in and MIDI-in
+      triggers, so the glitches land on the beat instead of wherever you happened
+      to drag them.
+    </p>
+    <p class="sub">
+      Load a clip. Beygla finds the transients in its audio — or in a separate
+      track, or from a live input, or from a controller — and turns each hit into
+      a trigger. Each trigger fires an effect rule that rewrites a span of
+      compressed video frames.
+    </p>
+    <div class="buttons">
+      <a class="latch" href="https://github.com/SungamMagnus/beygla/releases/latest">Download for macOS</a>
+      <a class="latch ghost" href="https://github.com/SungamMagnus/beygla">Read the source</a>
+    </div>
+    <p class="meta">
+      Version 0.1.0 &nbsp;·&nbsp; Universal, Apple Silicon and Intel &nbsp;·&nbsp;
+      macOS 14 or later &nbsp;·&nbsp; requires ffmpeg
+    </p>
+  </section>
+
+  <section class="panel teal">
+    <span class="title">The seven effects</span>
+    <p>
+      A compressed stream has two kinds of frame. A <strong>keyframe</strong> is a
+      whole picture. A <strong>delta frame</strong> carries only motion vectors and
+      a small correction — instructions for moving the previous picture's pixels
+      around. Every effect here works by lying about which pixels those
+      instructions were meant for.
+    </p>
+    <p>
+      Colour groups them by what they do to the frame array: one hue for stripping
+      reference frames, one for holding and repeating, one for reordering.
+    </p>
+
+    <div class="effects">
+      <div class="effect">
+        <div class="head">
+          <svg class="lamp" viewBox="0 0 9 9"><rect width="9" height="9" fill="var(--coral)"/></svg>
+          <span class="nm" style="color:var(--coral)">Bloom</span>
+          <span class="fam">strips</span>
+        </div>
+        <p>Deletes the keyframes inside the range. With no whole picture to reset
+        to, the incoming scene's motion vectors are applied to the outgoing
+        scene's pixels: the old image gets dragged around by the new image's
+        movement, holding its colours while taking on the wrong shape. It bites
+        hardest at a hard cut, where the two pictures have nothing in common.</p>
+      </div>
+
+      <div class="effect">
+        <div class="head">
+          <svg class="lamp" viewBox="0 0 9 9"><rect width="9" height="9" fill="var(--teal)"/></svg>
+          <span class="nm" style="color:var(--teal)">Glide</span>
+          <span class="fam">holds</span>
+        </div>
+        <p>Picks the last delta frame before the range and re-applies that same
+        one for every frame in it. The decoder keeps shifting pixels in the one
+        direction that frame described, so the picture slides steadily and smears
+        into itself. It does not decay — a longer range drifts further, and the
+        image eventually pulls apart.</p>
+      </div>
+
+      <div class="effect">
+        <div class="head">
+          <svg class="lamp" viewBox="0 0 9 9"><rect width="9" height="9" fill="var(--teal)"/></svg>
+          <span class="nm" style="color:var(--teal)">Echo</span>
+          <span class="fam">holds</span>
+        </div>
+        <p>Loops the first few delta frames of the range over and over. The same
+        short burst of motion replays on an ever-changing picture, so the image
+        churns in a cycle instead of drifting one way. Amount sets the loop
+        length: low is a tight flutter, high is a longer repeating phrase.</p>
+      </div>
+
+      <div class="effect">
+        <div class="head">
+          <svg class="lamp" viewBox="0 0 9 9"><rect width="9" height="9" fill="var(--teal)"/></svg>
+          <span class="nm" style="color:var(--teal)">Stutter</span>
+          <span class="fam">holds</span>
+        </div>
+        <p>Keeps one frame in every few and replaces the rest with skip frames, so
+        the picture updates in steps rather than continuously. The result is a
+        hard rhythmic judder that holds dead still between updates. Amount sets
+        the step: higher holds longer and reads slower and coarser.</p>
+      </div>
+
+      <div class="effect">
+        <div class="head">
+          <svg class="lamp" viewBox="0 0 9 9"><rect width="9" height="9" fill="var(--steel)"/></svg>
+          <span class="nm" style="color:var(--steel)">Reverse</span>
+          <span class="fam">reorders</span>
+        </div>
+        <p>Plays the range's delta frames back to front. Motion that was pushing
+        one way now pulls the other, against a picture that never reset, so shapes
+        crawl backwards through themselves. Any keyframe landing inside the
+        reversed run is neutralised — left in, it would snap the picture back.</p>
+      </div>
+
+      <div class="effect">
+        <div class="head">
+          <svg class="lamp" viewBox="0 0 9 9"><rect width="9" height="9" fill="var(--steel)"/></svg>
+          <span class="nm" style="color:var(--steel)">Shuffle</span>
+          <span class="fam">reorders</span>
+        </div>
+        <p>Randomly permutes the delta frames in the range, so each frame's motion
+        is applied at the wrong moment to the wrong picture. The image tears into
+        blocks that drift independently. The render is seeded, so the same project
+        always produces the same scramble.</p>
+      </div>
+
+      <div class="effect">
+        <div class="head">
+          <svg class="lamp" viewBox="0 0 9 9"><rect width="9" height="9" fill="var(--paper)" stroke="var(--teal)" stroke-opacity=".45"/></svg>
+          <span class="nm" style="color:var(--teal)">Freeze</span>
+          <span class="fam">holds</span>
+        </div>
+        <p>Replaces every frame in the range with a skip frame, which tells the
+        decoder the picture is unchanged. Motion stops dead and nothing smears —
+        the one effect here that holds perfectly still. Useful as a held beat
+        between two moving ones.</p>
+      </div>
+
+      <div class="effect" style="display:flex;align-items:center">
+        <p style="color:var(--ink-45)">Each effect is a rule. A rule has a length, an
+        amount, and four modulation parameters that let trigger velocity, chance,
+        jitter and timing offset move it.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <span class="title">How it works</span>
+    <p>
+      Datamoshing means feeding a decoder frames it was never meant to see. The
+      only practical way to do that is MPEG-4 Part 2 in an AVI container, because
+      AVI stores each compressed frame as a plainly delimited chunk you can
+      reorder with a hex editor.
+    </p>
+
+    <div class="diagram-scroll">
+    <svg class="diagram" viewBox="0 0 940 300" role="img"
+         aria-label="Signal flow: video is encoded to MPEG-4 AVI, moshed, then decoded; audio drives detection and is muxed back untouched at the decode.">
+      <g font-family="Menlo, monospace" font-size="11" letter-spacing="0.06em">
+
+        <!-- video path -->
+        <rect x="10"  y="60" width="112" height="32" fill="none" stroke="var(--ink-38)"/>
+        <text x="66"  y="80" text-anchor="middle" fill="var(--ink-85)">SOURCE.MP4</text>
+
+        <rect x="162" y="60" width="92"  height="32" fill="none" stroke="var(--steel)"/>
+        <text x="208" y="80" text-anchor="middle" fill="var(--steel)">ENCODE</text>
+
+        <rect x="294" y="60" width="112" height="32" fill="none" stroke="var(--ink-38)"/>
+        <text x="350" y="80" text-anchor="middle" fill="var(--ink-85)">RAW.AVI</text>
+
+        <rect x="446" y="60" width="92"  height="32" fill="none" stroke="var(--teal)"/>
+        <text x="492" y="80" text-anchor="middle" fill="var(--teal)">MOSH</text>
+
+        <rect x="578" y="60" width="112" height="32" fill="none" stroke="var(--ink-38)"/>
+        <text x="634" y="80" text-anchor="middle" fill="var(--ink-85)">MOSHED.AVI</text>
+
+        <rect x="730" y="60" width="92"  height="32" fill="none" stroke="var(--steel)"/>
+        <text x="776" y="80" text-anchor="middle" fill="var(--steel)">DECODE</text>
+
+        <rect x="862" y="60" width="68"  height="32" fill="none" stroke="var(--ink-38)"/>
+        <text x="896" y="80" text-anchor="middle" fill="var(--ink-85)">OUT</text>
+
+        <!-- wires meet only at right angles -->
+        <g stroke="var(--ink-45)" stroke-width="1" fill="none">
+          <path d="M122 76 H162"/><path d="M254 76 H294"/><path d="M406 76 H446"/>
+          <path d="M538 76 H578"/><path d="M690 76 H730"/><path d="M822 76 H862"/>
+        </g>
+
+        <!-- audio path -->
+        <rect x="10"  y="196" width="112" height="32" fill="none" stroke="var(--ink-38)"/>
+        <text x="66"  y="216" text-anchor="middle" fill="var(--ink-85)">AUDIO</text>
+
+        <rect x="162" y="196" width="92"  height="32" fill="none" stroke="var(--coral)"/>
+        <text x="208" y="216" text-anchor="middle" fill="var(--coral)">DETECT</text>
+
+        <rect x="294" y="196" width="112" height="32" fill="none" stroke="var(--coral)"/>
+        <text x="350" y="216" text-anchor="middle" fill="var(--coral)">TRIGGERS</text>
+
+        <g stroke="var(--coral)" stroke-width="1" fill="none">
+          <path d="M122 212 H162"/>
+          <path d="M254 212 H294"/>
+          <path d="M406 212 H492 V92"/>
+        </g>
+
+        <!-- the original audio bypasses the mosh entirely and rejoins at the decode -->
+        <g stroke="var(--ink-45)" stroke-width="1" fill="none">
+          <path d="M66 228 V270 H776 V92"/>
+        </g>
+        <!-- a filled dot marks a sum -->
+        <circle cx="776" cy="92" r="3.2" fill="var(--ink)"/>
+        <text x="470" y="286" fill="var(--ink-45)" font-size="10">AUDIO IS NEVER TOUCHED</text>
+
+        <text x="10" y="40" fill="var(--ink-45)" font-size="10">PICTURE</text>
+        <text x="10" y="176" fill="var(--ink-45)" font-size="10">SOUND</text>
+      </g>
+    </svg>
+    </div>
+    <p class="caption">The mosh is pure byte surgery. ffmpeg is only ever asked to do
+      the two things it is unambiguously good at: produce a clean MPEG-4
+      elementary stream, and decode a deliberately broken one without giving up.</p>
+  </section>
+
+  <section class="panel steel">
+    <span class="title">Why it stays in sync</span>
+    <p>
+      Every effect is <strong>length-preserving</strong>. An op only overwrites the
+      frame slots it covers — it never inserts or deletes. The usual approach of
+      duplicating frames to stretch a smear makes the video longer than its audio,
+      which is fine for a one-off render and useless when the whole point is that
+      the hits land on the kick.
+    </p>
+    <p>
+      Holding a frame is the interesting case. The obvious move — writing a
+      zero-length AVI chunk — does not work: the decoder emits no picture for it
+      and the output comes up short. On an eight-second test clip, holding thirty
+      frames turned 240 frames into 210.
+    </p>
+    <p>
+      What Beygla writes instead is a synthesised <strong>six-byte
+      <code>vop_coded = 0</code> P-VOP</strong>: a fully legal MPEG-4 frame meaning
+      "this picture is exactly the previous one". Building it requires reading
+      <code>vop_time_increment_resolution</code> out of the stream's VOL header,
+      which is not byte-aligned, so the parser walks it bit by bit.
+    </p>
+    <p>
+      That frame still produces no decoder output — but it leaves a correctly sized
+      <strong>hole in the presentation timeline</strong>, and decoding with
+      <code>-fps_mode cfr</code> refills the hole by repeating the last picture.
+      Frame count restored exactly, sync intact, and the intermediate AVI stays
+      playable in other tools.
+    </p>
+
+    <div class="figures">
+      <div class="fig"><span class="n">240 &rarr; 240</span><span class="l">frames at 30 fps, all seven effects</span></div>
+      <div class="fig"><span class="n">143 &rarr; 143</span><span class="l">frames at 23.976 fps, 24000/1001 preserved</span></div>
+      <div class="fig"><span class="n">6 bytes</span><span class="l">the synthesised skip frame</span></div>
+    </div>
+  </section>
+
+  <section class="panel coral">
+    <span class="title">Triggers</span>
+    <div class="rows">
+      <div class="row">
+        <div class="k">Audio track</div>
+        <div class="v">Transients in the clip's own audio, or in a separate file loaded
+          over it. The override drives detection, plays against the picture, and is
+          the track muxed into the render.</div>
+      </div>
+      <div class="row">
+        <div class="k">Audio in</div>
+        <div class="v">Arm, play the clip, and let the detector listen to whatever is
+          coming into your interface. Each hit is timestamped against the playhead.</div>
+      </div>
+      <div class="row">
+        <div class="k">MIDI in</div>
+        <div class="v">Perform on a controller. Bind a rule to one note to give it its
+          own pad. Listens to every connected source by default, or to one you pick.</div>
+      </div>
+      <div class="row">
+        <div class="k">By hand</div>
+        <div class="v">Double-click the timeline. A hand-placed trigger is an explicit
+          instruction, so it fires every enabled effect.</div>
+      </div>
+      <div class="row">
+        <div class="k">Detection</div>
+        <div class="v">Spectral flux over a selectable band — kick, snare, hats or full
+          range. Peaks are ranked by prominence and sensitivity selects what fraction
+          of that ranking to keep. Onset times are reported at the centre of the
+          analysis window; uncorrected, every hit reads about 12&nbsp;ms early.
+          Corrected, it lands within 3&nbsp;ms on a 120&nbsp;BPM pattern.</div>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <span class="title">Install</span>
+    <p>ffmpeg is required and is not bundled:</p>
+    <pre>brew install ffmpeg</pre>
+    <p>
+      Then download the release, unzip, and move <code>Beygla.app</code> to
+      Applications. The app is ad-hoc signed and not notarized, so Gatekeeper will
+      refuse it on first launch — right-click and choose <strong>Open</strong>, or
+      clear the quarantine flag:
+    </p>
+    <pre>xattr -dr com.apple.quarantine /Applications/Beygla.app</pre>
+    <p>
+      That is the honest state of it: a locally built app, not a distributed
+      product. Building from source avoids the issue entirely.
+    </p>
+    <pre>git clone https://github.com/SungamMagnus/beygla.git
+cd beygla &amp;&amp; ./build.sh</pre>
+    <p>
+      The same build produces <code>beyglactl</code>, a command-line front end that
+      shares every line of the actual moshing with the app.
+    </p>
+    <pre>beyglactl render clip.mp4 out.mp4 --band low --effect bloom --dur 0.4</pre>
+  </section>
+
+  <section class="panel">
+    <span class="title">Known limits</span>
+    <div class="rows">
+      <div class="row">
+        <div class="k">Live capture</div>
+        <div class="v">Arming records your performance against the playhead; the render
+          happens after. Real-time moshed output is possible with the same engine, but
+          it is not built yet.</div>
+      </div>
+      <div class="row">
+        <div class="k">Single clip</div>
+        <div class="v">Supermosh-style multi-clip transitions are not wired up. The
+          engine supports it — concatenate, force keyframes at the junctions, bloom
+          them — but there is no clip-list interface.</div>
+      </div>
+      <div class="row">
+        <div class="k">No icon</div>
+        <div class="v">The design system states outright that no logo exists and none
+          should be invented, so the app ships with the wordmark and no mark.</div>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  <div class="wrap line">
+    <span>Beygla 0.1.0</span>
+    <a href="https://github.com/SungamMagnus/beygla">github.com/SungamMagnus/beygla</a>
+    <a href="https://github.com/SungamMagnus/sungam-design-system">Built with the Sungam design system</a>
+    <span>Inspired by supermosh and Datamosher Pro</span>
+  </div>
+</footer>
+
+</body>
+</html>

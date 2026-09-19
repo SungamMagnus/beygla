@@ -1,0 +1,20 @@
+/* Flat, always. No shadow anywhere in any Sungam panel — a control reads by
+   its outline and its arc, not by lifting off the surface. Corners are
+   square except the two places a moving part needs to look soft: the fader
+   track and its handle. */
+:root{
+  --radius-none:0;
+  --radius-pill:999px;
+
+  --border-w-hair:1px;
+  --border-w-default:1.2px;
+  --border-w-strong:1.4px;
+
+  --shadow-none:none;
+
+  /* The pot sweep every knob shares: 317.2° of travel, leaving a gap at the
+     bottom where the pointer never goes. Bipolar controls grow their arc
+     from noon instead of from the anticlockwise stop. */
+  --knob-sweep-deg:317.2; /* @kind other */
+  --knob-arc-start-deg:111.4; /* @kind other */
+}

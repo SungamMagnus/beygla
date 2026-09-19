@@ -1,0 +1,67 @@
+/* Sungam — colour tokens. Paper and ink are the constant; every accent below
+   is a section colour, never decoration. Two palettes ship as CSS: the
+   Signal palette (Whoomp / Lacze — the house default) and two documented
+   product variants (Colacut, Cloudius) for reference. Pick the Signal
+   palette for anything new unless the brief calls for a one-off product
+   identity the way Colacut and Cloudius each have. */
+:root{
+  /* ── Base ─────────────────────────────────────────────────────────── */
+  --paper:#f0ece2;
+  --ink:#1a1a17;
+  --ink-08:rgba(26,26,23,.08);
+  --ink-13:rgba(26,26,23,.13);
+  --ink-18:rgba(26,26,23,.18);
+  --ink-22:rgba(26,26,23,.22);
+  --ink-28:rgba(26,26,23,.28);
+  --ink-32:rgba(26,26,23,.32);
+  --ink-38:rgba(26,26,23,.38);
+  --ink-45:rgba(26,26,23,.45);
+  --ink-55:rgba(26,26,23,.55);
+  --ink-62:rgba(26,26,23,.62);
+  --ink-70:rgba(26,26,23,.70);
+  --ink-78:rgba(26,26,23,.78);
+  --ink-85:rgba(26,26,23,.85);
+
+  /* ── Signal palette (Whoomp / Lacze) — the house default ─────────── */
+  --coral:#ed8159;   /* the signal path: primary engine / macro controls */
+  --teal:#52b0a4;    /* the secondary engine / character section */
+  --steel:#4f7ea8;   /* everything after the sections are summed: the chain, the output */
+  --violet:#6b5bc4;  /* modulation, and only modulation */
+  --amber:#c08d16;   /* the limiter, and nothing else */
+  --lilac:#d3a7dc;   /* pale trims — subordinate to the control they hang off */
+  --lilac-text:#9a63ab; /* lilac is too pale for small type; this is its readable relative */
+
+  /* ── Semantic aliases — use these in new work ─────────────────────── */
+  --surface:var(--paper);
+  --text-primary:var(--ink);
+  --text-secondary:var(--ink-62);
+  --text-tertiary:var(--ink-38);
+  --border-hairline:var(--ink-13);
+  --border-default:var(--ink-22);
+  --border-strong:var(--ink-32);
+  --accent-primary:var(--coral);
+  --accent-secondary:var(--teal);
+  --accent-tertiary:var(--steel);
+  --accent-modulation:var(--violet);
+  --accent-warning:var(--amber);
+  --accent-subtle:var(--lilac);
+
+  /* ── Colacut variant (Sungam/Heavylight fork) — burnt orange / ink blue / deep teal ── */
+  --colacut-paper:#f2f1ec;
+  --colacut-ink:#191c1b;
+  --colacut-perform:#c2521a;
+  --colacut-mod:#2e4b8f;
+  --colacut-voice:#0f7a72;
+  --colacut-depth:#a8285a;
+  --colacut-signal:#2e8b4a;
+  --colacut-clip:#c62b1c;
+  --colacut-wheel:#6b34b0;
+
+  /* ── Cloudius variant — brushed aluminium, LED colours only ───────── */
+  --cloudius-paper:#eef0ec;
+  --cloudius-ink:#15181b;
+  --cloudius-grain:#2e7d52;
+  --cloudius-engine:#c17d1f;
+  --cloudius-blend:#ab3b2c;
+  --cloudius-freeze:#d6452f;
+}

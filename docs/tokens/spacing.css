@@ -1,0 +1,34 @@
+/* Sungam panels are drawn in a fixed design-pixel grid (1280x1000 for
+   Whoomp, 1080x580 for Lacze, 960x468 for Colacut, 810x294 for Cloudius) and
+   scaled as one block — so these numbers are also hit-test geometry in the
+   real plug-ins. Keep controls on these sizes rather than inventing new
+   ones. */
+:root{
+  --space-1:4px;
+  --space-2:8px;
+  --space-3:12px;
+  --space-4:16px;
+  --space-5:20px;
+  --space-6:24px;
+  --space-8:32px;
+
+  /* Knob radii — size says how much a control matters */
+  --knob-r-xl:32px;   /* the one control that transforms everything downstream (Tune, Drive) */
+  --knob-r-lg:26px;
+  --knob-r-md:20px;
+  --knob-r-sm:15px;
+  --knob-r-xs:13px;
+  --knob-r-trim:11px; /* a modulation depth, never a control of its own */
+
+  /* Faders */
+  --fader-track-w:6px;
+  --fader-handle-w:14px;
+  --fader-handle-h:4px;
+  --fader-travel:130px;
+  --fader-step:46px;   /* column-to-column spacing */
+
+  /* Small fixed elements */
+  --lamp-size:9px;
+  --terminal-r:7px;
+  --latch-h:17px;
+}
