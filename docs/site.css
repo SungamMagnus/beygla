@@ -41,6 +41,10 @@ header{border-bottom:1px solid var(--ink-13);padding:22px 0}
 
 /* ── Hero ─────────────────────────────────────────────────────────────── */
 .hero{padding:56px 0 44px}
+/* The icon is itself a moshed frame, so it is shown square and unretouched
+   rather than dressed up in a rounded plate. */
+.appicon{display:block;width:96px;height:96px;margin:0 0 22px;
+         border:1px solid var(--ink-18);image-rendering:auto}
 .hero h1{
   font-size:var(--w-3xl);font-weight:700;letter-spacing:.28em;text-transform:uppercase;
   margin:0 0 20px;line-height:1.1;color:var(--ink);

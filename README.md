@@ -232,6 +232,10 @@ Sources/beyglactl/           # command line front end
 
 ## Design
 
+The app icon is a frame of genuinely datamoshed video — a letterform run
+through Beygla's own engine, with a frame pulled from a few past the bloom.
+`icon/README.md` has the method; `./icon/make.sh` rebuilds it.
+
 Beygla is built on the
 [Sungam design system](https://github.com/SungamMagnus/sungam-design-system),
 which means the app is a panel, not a form. `SungamKit.swift` ports the
@@ -291,8 +295,5 @@ they do to the frame array, and each family takes one hue:
 - **Single clip.** Supermosh's multi-clip transitions aren't in yet; the engine
   supports it (concatenate, force keyframes at the junctions, bloom them) but
   there's no UI for a clip list.
-- **No app icon.** The design system has no icon vocabulary and states outright
-  that no logo exists and none should be invented, so the app ships with the
-  wordmark and no mark.
 - **Ad-hoc signed.** Fine locally; it needs a Developer ID to hand to anyone
   else.

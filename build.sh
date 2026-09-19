@@ -26,6 +26,12 @@ cp "$BIN/Beygla" "$APP/Contents/MacOS/Beygla"
 cp Resources/Info.plist "$APP/Contents/Info.plist"
 printf 'APPL????' > "$APP/Contents/PkgInfo"
 
+# The icon is a frame of real datamoshed video — see icon/README.md. Rebuild it
+# from the plates with `./icon/make.sh`.
+if [[ -f icon/Beygla.icns ]]; then
+  cp icon/Beygla.icns "$APP/Contents/Resources/Beygla.icns"
+fi
+
 # Bundling ffmpeg here makes the app self-contained; without it Beygla falls
 # back to whatever is on PATH or in the usual Homebrew locations.
 if [[ -n "${BEYGLA_BUNDLE_FFMPEG:-}" ]]; then
