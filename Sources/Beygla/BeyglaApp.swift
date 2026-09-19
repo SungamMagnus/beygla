@@ -7,6 +7,26 @@ import UniformTypeIdentifiers
 struct BeyglaApp: App {
     @StateObject private var model = AppModel()
 
+    init() {
+        // `Beygla.app/Contents/MacOS/Beygla --print-tool` reports which ffmpeg
+        // the app actually resolved. Without it there is no way to check the
+        // self-contained claim from outside: emptying PATH proves nothing,
+        // because the search falls back to hardcoded Homebrew prefixes that
+        // ignore it, and both binaries produce H.264 either way.
+        if CommandLine.arguments.contains("--print-tool") {
+            if let t = FFmpegTool.locate(bundledIn: Bundle.main.resourceURL) {
+                print("source:  \(t.capabilities.isBundled ? "bundled" : "system")")
+                print("path:    \(t.ffmpeg.path)")
+                print("version: \(t.capabilities.version)")
+                print("encoder: \(t.capabilities.videoEncoder)")
+                print("libx264: \(t.capabilities.hasLibX264)")
+            } else {
+                print("source:  none")
+            }
+            exit(0)
+        }
+    }
+
     var body: some Scene {
         Window("Beygla", id: "main") {
             ContentView()

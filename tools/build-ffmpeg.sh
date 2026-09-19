@@ -39,7 +39,12 @@ COMPONENTS=(
   --enable-demuxer=mov,matroska,avi,mpegts,flv,wav,mp3,aac,flac,ogg,aiff,w64,image2,rawvideo,m4v,mpegvideo,concat,pcm_s16le,pcm_f32le
   --enable-decoder=h264,hevc,mpeg4,mpeg2video,mpeg1video,vp8,vp9,av1,prores,dnxhd,mjpeg,png,rawvideo,aac,ac3,eac3,mp3,flac,vorbis,opus,alac,pcm_s16le,pcm_s16be,pcm_s24le,pcm_f32le,pcm_u8
   --enable-encoder=mpeg4,h264_videotoolbox,hevc_videotoolbox,aac,aac_at,pcm_s16le,pcm_f32le,rawvideo,mjpeg,png
-  --enable-muxer=avi,mp4,mov,matroska,wav,rawvideo,image2,null
+  # pcm_f32le is not optional: onset detection reads the audio by piping raw
+  # float PCM out of ffmpeg, and without that muxer the pipe is empty and every
+  # audio trigger silently disappears. Note the name — the format is selected
+  # on the command line as `-f f32le`, but the configure component that has to
+  # be enabled is `pcm_f32le`, and asking for the wrong one builds quietly.
+  --enable-muxer=avi,mp4,mov,matroska,wav,rawvideo,image2,null,pcm_f32le,pcm_s16le
   --enable-parser=h264,hevc,mpeg4video,mpegvideo,aac,ac3,mpegaudio,flac,vp8,vp9,av1,opus,vorbis,dnxhd,mjpeg,png
   --enable-bsf=aac_adtstoasc,h264_mp4toannexb,hevc_mp4toannexb,extract_extradata,null,mpeg4_unpack_bframes
   --enable-protocol=file,pipe,fd

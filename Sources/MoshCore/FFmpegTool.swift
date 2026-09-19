@@ -143,10 +143,15 @@ public final class FFmpegTool: @unchecked Sendable {
     /// Look for the binaries next to the app first (a bundled copy), then in the
     /// usual places, then on PATH.
     public static func locate(bundledIn resourceDir: URL? = nil) -> FFmpegTool? {
+        // Alongside the running executable, which is where a command-line build
+        // sitting next to a copy of ffmpeg would find it.
+        let beside = URL(fileURLWithPath: CommandLine.arguments.first ?? "")
+            .resolvingSymlinksInPath().deletingLastPathComponent()
+
         // A bundled copy wins. It is the one that is guaranteed to be there and
         // to behave the same on every machine, which matters more for a render
         // than the marginal quality of one encoder over another.
-        if let dir = resourceDir {
+        for dir in [resourceDir, beside].compactMap({ $0 }) {
             let a = dir.appendingPathComponent("ffmpeg")
             let b = dir.appendingPathComponent("ffprobe")
             if FileManager.default.isExecutableFile(atPath: a.path),
