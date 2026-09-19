@@ -45,7 +45,7 @@
       <a class="latch ghost" href="https://github.com/SungamMagnus/beygla">Read the source</a>
     </div>
     <p class="meta">
-      Version 0.3.1 &nbsp;·&nbsp; Universal, Apple Silicon and Intel &nbsp;·&nbsp;
+      Version 0.4.0 &nbsp;·&nbsp; Universal, Apple Silicon and Intel &nbsp;·&nbsp;
       macOS 14 or later &nbsp;·&nbsp; no dependencies
     </p>
   </section>
@@ -188,6 +188,117 @@
           <span class="fam">reorders</span>
         </div>
         <p>Shuffled in blocks, so motion stays coherent inside each one and only the joins are wrong.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel lilac">
+    <span class="title">Eleven more, rewriting motion instead of frames</span>
+    <p>
+      Everything above treats a compressed frame as an opaque blob and only ever
+      moves, holds or deletes whole ones. These decode a frame just far enough to
+      expose its motion vectors as a plain array, run a transform over that array,
+      and re-encode with the edited vectors instead of the real ones — a genuine
+      decode/edit/re-encode pass, not byte surgery, ported from the FFglitch
+      scripts in <a href="https://github.com/Akascape/Datamosher-Pro">Datamosher Pro</a>.
+      Needs <a href="https://ffglitch.org">FFglitch</a>'s <code>ffgac</code> and
+      <code>ffedit</code> as a second, optional build; Beygla runs exactly as
+      before without them, just with these eleven unavailable.
+    </p>
+    <p>
+      Combining a vector rule and a bitstream rule in one render costs exactly one
+      extra encode generation — the one <code>ffgac</code> needs to force a vector
+      onto every macroblock — not two independent renders' worth.
+    </p>
+
+    <div class="effects">
+      <div class="effect">
+        <div class="head">
+          <svg class="lamp" viewBox="0 0 9 9"><rect width="9" height="9" fill="var(--lilac-text)"/></svg>
+          <span class="nm" style="color:var(--lilac-text)">Sink</span>
+          <span class="fam">vector</span>
+        </div>
+        <p>Freezes anything moving faster than a threshold; slow motion is untouched.</p>
+      </div>
+      <div class="effect">
+        <div class="head">
+          <svg class="lamp" viewBox="0 0 9 9"><rect width="9" height="9" fill="var(--lilac-text)"/></svg>
+          <span class="nm" style="color:var(--lilac-text)">Stop</span>
+          <span class="fam">vector</span>
+        </div>
+        <p>Freezes every block's motion, unconditionally.</p>
+      </div>
+      <div class="effect">
+        <div class="head">
+          <svg class="lamp" viewBox="0 0 9 9"><rect width="9" height="9" fill="var(--lilac-text)"/></svg>
+          <span class="nm" style="color:var(--lilac-text)">Invert</span>
+          <span class="fam">vector</span>
+        </div>
+        <p>Negates every vector — right becomes left, up becomes down.</p>
+      </div>
+      <div class="effect">
+        <div class="head">
+          <svg class="lamp" viewBox="0 0 9 9"><rect width="9" height="9" fill="var(--lilac-text)"/></svg>
+          <span class="nm" style="color:var(--lilac-text)">Mirror</span>
+          <span class="fam">vector</span>
+        </div>
+        <p>Reflects the motion field left to right.</p>
+      </div>
+      <div class="effect">
+        <div class="head">
+          <svg class="lamp" viewBox="0 0 9 9"><rect width="9" height="9" fill="var(--lilac-text)"/></svg>
+          <span class="nm" style="color:var(--lilac-text)">Vibrate</span>
+          <span class="fam">vector</span>
+        </div>
+        <p>Adds an independent random jitter to every block, every frame.</p>
+      </div>
+      <div class="effect">
+        <div class="head">
+          <svg class="lamp" viewBox="0 0 9 9"><rect width="9" height="9" fill="var(--lilac-text)"/></svg>
+          <span class="nm" style="color:var(--lilac-text)">Zoom</span>
+          <span class="fam">vector</span>
+        </div>
+        <p>Adds an outward — or at low amount, inward — radial push from centre.</p>
+      </div>
+      <div class="effect">
+        <div class="head">
+          <svg class="lamp" viewBox="0 0 9 9"><rect width="9" height="9" fill="var(--lilac-text)"/></svg>
+          <span class="nm" style="color:var(--lilac-text)">Slam Zoom</span>
+          <span class="fam">vector</span>
+        </div>
+        <p>Replaces motion with a pure radial field instead of adding to it.</p>
+      </div>
+      <div class="effect">
+        <div class="head">
+          <svg class="lamp" viewBox="0 0 9 9"><rect width="9" height="9" fill="var(--lilac-text)"/></svg>
+          <span class="nm" style="color:var(--lilac-text)">Shear</span>
+          <span class="fam">vector</span>
+        </div>
+        <p>Adds a diagonal offset that grows with distance from centre.</p>
+      </div>
+      <div class="effect">
+        <div class="head">
+          <svg class="lamp" viewBox="0 0 9 9"><rect width="9" height="9" fill="var(--lilac-text)"/></svg>
+          <span class="nm" style="color:var(--lilac-text)">Delay</span>
+          <span class="fam">vector</span>
+        </div>
+        <p>Replaces each block's vector with one from several frames ago; past halfway, Amount blends a feedback trail instead.</p>
+      </div>
+      <div class="effect">
+        <div class="head">
+          <svg class="lamp" viewBox="0 0 9 9"><rect width="9" height="9" fill="var(--lilac-text)"/></svg>
+          <span class="nm" style="color:var(--lilac-text)">Shift</span>
+          <span class="fam">vector</span>
+        </div>
+        <p>Feeds vertical motion into the next frame with a constant added each time, like gravity accelerating a fall.</p>
+      </div>
+      <div class="effect">
+        <div class="head">
+          <svg class="lamp" viewBox="0 0 9 9"><rect width="9" height="9" fill="var(--lilac-text)"/></svg>
+          <span class="nm" style="color:var(--lilac-text)">Noise</span>
+          <span class="fam">vector</span>
+        </div>
+        <p>Multiplies the slowest-moving blocks instead of the fastest — the inverse of what a glitch usually does.</p>
       </div>
     </div>
   </section>
@@ -410,7 +521,7 @@ cd beygla
 
 <footer>
   <div class="wrap line">
-    <span>Beygla 0.3.1</span>
+    <span>Beygla 0.4.0</span>
     <a href="https://github.com/SungamMagnus/beygla">github.com/SungamMagnus/beygla</a>
     <a href="https://github.com/SungamMagnus/sungam-design-system">Built with the Sungam design system</a>
     <span>Inspired by supermosh and Datamosher Pro</span>

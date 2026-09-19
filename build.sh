@@ -45,9 +45,21 @@ else
   echo "    no bundled ffmpeg — run ./tools/build-ffmpeg.sh to make the app self-contained"
 fi
 
+# The vector-effect engine (ffgac/ffedit) is a second, optional download —
+# build it with ./tools/build-ffglitch.sh. Without it Beygla still runs; the
+# eleven vector effects just stay unavailable until it is present, either
+# bundled here or found on PATH.
+if [[ -x vendor/ffglitch/ffgac && -x vendor/ffglitch/ffedit ]]; then
+  cp vendor/ffglitch/ffgac vendor/ffglitch/ffedit "$APP/Contents/Resources/"
+  echo "    bundled ffglitch $(cat vendor/ffglitch/VERSION 2>/dev/null || echo '?') ($(lipo -archs vendor/ffglitch/ffgac))"
+else
+  echo "    no bundled ffglitch — run ./tools/build-ffglitch.sh for vector effects"
+fi
+
 # Ad-hoc signature. Nested executables have to be signed before the bundle
 # that contains them, or the outer signature is invalid the moment it is made.
-for nested in "$APP/Contents/Resources/ffmpeg" "$APP/Contents/Resources/ffprobe"; do
+for nested in "$APP/Contents/Resources/ffmpeg" "$APP/Contents/Resources/ffprobe" \
+               "$APP/Contents/Resources/ffgac" "$APP/Contents/Resources/ffedit"; do
   [[ -f "$nested" ]] && codesign --force --sign - --timestamp=none "$nested" >/dev/null 2>&1
 done
 codesign --force --sign - --timestamp=none "$APP" >/dev/null 2>&1 || \

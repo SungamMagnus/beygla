@@ -70,5 +70,22 @@ env -i "$APP/ffprobe" -v error -select_streams v:0 -count_frames \
     | sed 's/^/    /'
 env -i "$APP/ffprobe" -v error -select_streams a:0 \
     -show_entries stream=codec_name,duration -of csv=p=0 "$OUT" | sed 's/^/    audio /'
+
+echo "==> Vector engine (ffgac/ffedit)"
+if [[ -x "$APP/ffgac" && -x "$APP/ffedit" ]]; then
+  echo "    archs: $(lipo -archs "$APP/ffgac")"
+  grep -q "^vector:  bundled" <<<"$RESOLVED" || { echo "    FAIL: app did not resolve the bundled vector engine"; exit 1; }
+
+  # Full round trip through the actual pipeline, same discipline as the main
+  # engine: run it, don't infer it. Same staged directory, still in place.
+  cp "$APP/ffgac" "$APP/ffedit" "$STAGE/"
+  VRENDER=$( cd "$STAGE" && env -i HOME="$HOME" PATH="" ./beyglactl render cuts.mp4 vector_out.mp4 \
+      --band low --effect none --vector-effect sink --vector-dur 0.5 2>&1 | tail -8 )
+  echo "$VRENDER" | sed 's/^/    /'
+  grep -qE "frames    240" <<<"$VRENDER" || { echo "    FAIL: vector render did not produce 240 frames"; exit 1; }
+else
+  echo "    not bundled — run ./tools/build-ffglitch.sh (vector effects unavailable until then)"
+fi
+
 rm -rf "$STAGE"
 echo "==> Self-contained."

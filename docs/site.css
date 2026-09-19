@@ -74,6 +74,7 @@ header{border-bottom:1px solid var(--ink-13);padding:22px 0}
 .panel.coral{border-color:var(--coral)} .panel.coral > .title{color:var(--coral)}
 .panel.teal{border-color:var(--teal)}   .panel.teal  > .title{color:var(--teal)}
 .panel.steel{border-color:var(--steel)} .panel.steel > .title{color:var(--steel)}
+.panel.lilac{border-color:var(--lilac-text)} .panel.lilac > .title{color:var(--lilac-text)}
 
 .panel p{margin:0 0 14px;max-width:72ch;color:var(--ink-78)}
 .panel p:last-child{margin-bottom:0}

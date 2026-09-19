@@ -15,6 +15,7 @@ struct Inspector: View {
                 if model.triggerSource == .audio { detectionPanel }
                 if model.triggerSource == .midi { midiPanel }
                 effectsPanel
+                vectorEffectsPanel
                 streamPanel
             }
             .padding(16)
@@ -314,6 +315,66 @@ struct Inspector: View {
         }
     }
 
+    // MARK: Vector effects — lilac, subordinate to the bitstream engine
+    //
+    // A second, optional pass: motion vectors rewritten inside frames rather
+    // than whole frames reordered. Needs ffgac/ffedit, a separate download
+    // this app can run entirely without, so the panel says so plainly rather
+    // than presenting broken controls when the tool is missing.
+
+    private var vectorEffectsPanel: some View {
+        PanelFrame(title: "Vector effects", color: Sungam.lilacText) {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Rewrites motion vectors inside frames instead of reordering whole ones. Ported from Datamosher Pro's FFglitch scripts.")
+                    .font(Sungam.mono(Sungam.textSm))
+                    .foregroundStyle(Sungam.ink62)
+                    .lineSpacing(4)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if model.vectorEngineMissing {
+                    HStack(spacing: 6) {
+                        Lamp(on: false, color: Sungam.amber, size: 7)
+                        Text("ffgac/ffedit not found — run tools/build-ffglitch.sh")
+                            .font(Sungam.mono(Sungam.text2xs))
+                            .foregroundStyle(Sungam.amber)
+                    }
+                } else {
+                    Text("AVAILABLE")
+                        .font(Sungam.mono(Sungam.text2xs))
+                        .tracking(Sungam.text2xs * Sungam.scale * 0.08)
+                        .foregroundStyle(Sungam.ink45)
+
+                    LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 5), count: 3),
+                              spacing: 5) {
+                        ForEach(VectorOpKind.allCases) { kind in
+                            LatchButton(label: kind.displayName, color: kind.signalColor) {
+                                model.vectorRules.append(
+                                    VectorRule(kind: kind, source: model.triggerSource,
+                                              band: model.triggerSource == .audio
+                                                    ? model.onsetSettings.band : nil)
+                                )
+                            }
+                        }
+                    }
+
+                    if !model.vectorRules.isEmpty {
+                        Rectangle().fill(Sungam.ink13).frame(height: Sungam.hairline)
+                        Text("IN USE")
+                            .font(Sungam.mono(Sungam.text2xs))
+                            .tracking(Sungam.text2xs * Sungam.scale * 0.08)
+                            .foregroundStyle(Sungam.ink45)
+
+                        ForEach($model.vectorRules) { $rule in
+                            VectorRuleRow(rule: $rule, lastNote: model.midiInput.lastNote?.number) {
+                                model.vectorRules.removeAll { $0.id == rule.id }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     // MARK: Stream — steel, the render chain
 
     private var streamPanel: some View {
@@ -441,6 +502,128 @@ struct RuleRow: View {
                 }
 
                 // Modulation — violet, and nothing else on the panel is violet.
+                HStack(spacing: 10) {
+                    Knob(label: "Velocity", value: $rule.strengthInfluence,
+                         radius: 13, color: Sungam.violet,
+                         format: { String(format: "%.2f", $0) })
+                    Knob(label: "Chance", value: $rule.probability,
+                         radius: 13, color: Sungam.violet,
+                         format: { String(format: "%.2f", $0) })
+                    Knob(label: "Jitter", value: $rule.durationJitter,
+                         radius: 13, color: Sungam.violet,
+                         format: { String(format: "%.2f", $0) })
+                    Knob(label: "Offset", value: $rule.offset, range: -0.3 ... 0.3,
+                         radius: 13, color: Sungam.violet, bipolar: true,
+                         format: { String(format: "%+.0fms", $0 * 1000) })
+                }
+            }
+        }
+        .padding(10)
+        .overlay(Rectangle().stroke(Sungam.ink13, lineWidth: Sungam.hairline))
+    }
+}
+
+/// The vector family's twin of `RuleRow` — same layout, same behaviour,
+/// against `VectorRule`/`VectorOpKind` instead. Kept as a full duplicate
+/// rather than a generic over both types: the two engines are different
+/// enough (one edits a picture's motion, the other reorders whole frames)
+/// that collapsing them into one generic would obscure more than it saves.
+struct VectorRuleRow: View {
+    @Binding var rule: VectorRule
+    var lastNote: Int?
+    var onDelete: () -> Void
+    @State private var expanded = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Lamp(on: rule.enabled, color: rule.kind.signalColor, size: 9)
+                    .onTapGesture { rule.enabled.toggle() }
+
+                Text(rule.kind.displayName.uppercased())
+                    .font(Sungam.mono(Sungam.textBase, weight: .bold))
+                    .tracking(Sungam.textBase * Sungam.scale * 0.06)
+                    .foregroundStyle(rule.enabled ? Sungam.ink85 : Sungam.ink38)
+
+                Text(rule.kind.summary)
+                    .font(Sungam.mono(Sungam.text2xs))
+                    .foregroundStyle(Sungam.ink38)
+                    .lineLimit(1)
+
+                Spacer()
+
+                Text(rule.activeRegions.isEmpty
+                     ? "ALWAYS"
+                     : "\(rule.activeRegions.count) SPAN\(rule.activeRegions.count == 1 ? "" : "S")")
+                    .font(Sungam.mono(Sungam.text2xs))
+                    .foregroundStyle(rule.activeRegions.isEmpty ? Sungam.ink38
+                                                                : rule.kind.signalColor)
+
+                Text(String(format: "%.0fMS", rule.duration * 1000))
+                    .font(Sungam.mono(Sungam.text2xs))
+                    .foregroundStyle(Sungam.ink62)
+
+                LatchButton(label: expanded ? "Close" : "Edit") { expanded.toggle() }
+                LatchButton(label: "Del", action: onDelete)
+            }
+
+            if expanded {
+                if !rule.activeRegions.isEmpty {
+                    HStack(spacing: 8) {
+                        Text("Live only inside the painted spans.")
+                            .font(Sungam.mono(Sungam.text2xs))
+                            .foregroundStyle(Sungam.ink55)
+                        Spacer()
+                        LatchButton(label: "Always") { rule.activeRegions.removeAll() }
+                    }
+                }
+
+                Text(rule.kind.blurb)
+                    .font(Sungam.mono(Sungam.textSm))
+                    .foregroundStyle(Sungam.ink70)
+                    .lineSpacing(4)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.vertical, 2)
+
+                Text("Ported from \(rule.kind.source)")
+                    .font(Sungam.mono(Sungam.text2xs))
+                    .foregroundStyle(Sungam.ink38)
+
+                Selector(options: TriggerSource.allCases.map { ($0, $0.displayName) },
+                         selection: $rule.source, color: rule.kind.signalColor)
+
+                if rule.source == .audio {
+                    Selector(options: OnsetBand.allCases.map { ($0, $0.shortName) },
+                             selection: Binding(
+                                get: { rule.band ?? .full },
+                                set: { rule.band = $0 }
+                             ),
+                             color: rule.kind.signalColor)
+                }
+
+                if rule.source == .midi {
+                    HStack(spacing: 8) {
+                        LabelValue(label: "Note",
+                                   value: rule.note.map { "\($0.midiNoteName)" } ?? "ANY",
+                                   color: Sungam.steel, size: Sungam.textSm)
+                        Spacer()
+                        LatchButton(label: "Learn", enabled: lastNote != nil) {
+                            rule.note = lastNote
+                        }
+                        LatchButton(label: "Any") { rule.note = nil }
+                    }
+                }
+
+                HStack(spacing: 10) {
+                    Knob(label: "Length", value: $rule.duration, range: 0.03 ... 3.0,
+                         radius: 15, color: rule.kind.signalColor,
+                         format: { String(format: "%.0fms", $0 * 1000) })
+                    Knob(label: "Amount", value: $rule.amountFloor,
+                         radius: 15, color: rule.kind.signalColor,
+                         format: { String(format: "%.2f", $0) })
+                    Spacer()
+                }
+
                 HStack(spacing: 10) {
                     Knob(label: "Velocity", value: $rule.strengthInfluence,
                          radius: 13, color: Sungam.violet,

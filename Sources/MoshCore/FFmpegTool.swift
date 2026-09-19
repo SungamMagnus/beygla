@@ -320,6 +320,48 @@ public final class FFmpegTool: @unchecked Sendable {
         try run(ffmpeg, args, token: token, progress: progress)
     }
 
+    // MARK: - Vector-effect plumbing
+    //
+    // These two exist only to hand frames to and from FFglitchTool, which
+    // needs raw pixels in and produces a bare elementary stream out. Neither
+    // is part of the regular render path.
+
+    /// Decode a video's picture to raw planar YUV420p, ready for `ffgac`.
+    public func decodeToRawYUV(input: URL, output: URL, width: Int, height: Int,
+                               token: ProcessToken? = nil) throws {
+        try run(ffmpeg, [
+            "-y", "-hide_banner",
+            "-i", input.path, "-an",
+            "-vf", "scale=\(width):\(height):flags=neighbor",
+            "-pix_fmt", "yuv420p", "-f", "rawvideo",
+            output.path,
+        ], token: token)
+    }
+
+    /// Wrap a bare MPEG-4 elementary stream (what `ffedit` produces) in an AVI
+    /// container, as a lossless stream copy, so `MoshEngine`'s byte surgery
+    /// can run on it exactly the way it runs on any other moshable AVI.
+    ///
+    /// `frameRate` has to be stated explicitly on the way in, and
+    /// `-fps_mode passthrough` on the way out: a bare elementary stream
+    /// carries no reliable timing of its own, and without both the AVI muxer
+    /// infers a rate from the packets' timestamps that does not usually match
+    /// the one the stream was actually encoded at, padding the gap with
+    /// zero-length filler chunks. On this pipeline's own 30fps test clip that
+    /// turned 240 real frames into 4800 chunks — 240 real ones and 4560
+    /// filler — which is `AVIDocument.frameCount` silently lying to every op
+    /// range computed from it afterward.
+    public func remuxToAVI(elementaryStream: URL, output: URL, frameRate: Double,
+                           token: ProcessToken? = nil) throws {
+        try run(ffmpeg, [
+            "-y", "-hide_banner",
+            "-r", String(frameRate),
+            "-f", "m4v", "-i", elementaryStream.path,
+            "-c", "copy", "-fps_mode", "passthrough", "-f", "avi",
+            output.path,
+        ], token: token)
+    }
+
     // MARK: - Audio
 
     /// Pull mono float PCM out of a file for onset analysis.

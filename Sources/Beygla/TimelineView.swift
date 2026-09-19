@@ -1,6 +1,59 @@
 import MoshCore
 import SwiftUI
 
+/// One row on the timeline: either a bitstream rule or a vector rule. The
+/// canvas draws and paints both families through this one shape rather than
+/// duplicating the whole lane/gesture system, which is what makes adding the
+/// second effect family to the timeline a small change instead of a second
+/// copy of TimelineView.
+private enum LaneRule: Identifiable {
+    case bitstream(MoshRule)
+    case vector(VectorRule)
+
+    var id: UUID {
+        switch self {
+        case .bitstream(let r): return r.id
+        case .vector(let r): return r.id
+        }
+    }
+    var displayName: String {
+        switch self {
+        case .bitstream(let r): return r.kind.displayName
+        case .vector(let r): return r.kind.displayName
+        }
+    }
+    var color: Color {
+        switch self {
+        case .bitstream(let r): return r.kind.signalColor
+        case .vector(let r): return r.kind.signalColor
+        }
+    }
+    var activeRegions: [ActiveRegion] {
+        switch self {
+        case .bitstream(let r): return r.activeRegions
+        case .vector(let r): return r.activeRegions
+        }
+    }
+    func matches(_ event: TriggerEvent) -> Bool {
+        switch self {
+        case .bitstream(let r): return r.matches(event)
+        case .vector(let r): return r.matches(event)
+        }
+    }
+    var offset: Double {
+        switch self {
+        case .bitstream(let r): return r.offset
+        case .vector(let r): return r.offset
+        }
+    }
+    var duration: Double {
+        switch self {
+        case .bitstream(let r): return r.duration
+        case .vector(let r): return r.duration
+        }
+    }
+}
+
 /// Waveform and onset curve on top, one lane per enabled effect underneath.
 ///
 /// The lanes are the point of the view. A rule with no painted span is live for
@@ -12,14 +65,18 @@ struct TimelineView: View {
     @EnvironmentObject var model: AppModel
 
     /// An in-progress paint, held until the drag ends.
-    @State private var paint: (ruleID: UUID, from: Double, to: Double)?
+    private enum PaintKind { case bitstream, vector }
+    @State private var paint: (ruleID: UUID, kind: PaintKind, from: Double, to: Double)?
 
     private let waveH: Double = 96
     private let rowH: Double = 17
     private let gap: Double = 10
 
     private var duration: Double { max(model.info?.duration ?? 0, 0.001) }
-    private var lanes: [MoshRule] { model.rules.filter(\.enabled) }
+    private var lanes: [LaneRule] {
+        model.rules.filter(\.enabled).map(LaneRule.bitstream)
+            + model.vectorRules.filter(\.enabled).map(LaneRule.vector)
+    }
     private var laneY: Double { waveH + gap }
     private var height: Double { laneY + Double(max(lanes.count, 1)) * rowH + 8 }
 
@@ -42,7 +99,10 @@ struct TimelineView: View {
                     model.addManualTrigger(at: t)
                 } else if let rule = lane(at: p.y) {
                     // Double-click inside a span removes it.
-                    model.removeRegion(from: rule.id, at: t)
+                    switch rule {
+                    case .bitstream(let r): model.removeRegion(from: r.id, at: t)
+                    case .vector(let r): model.removeVectorRegion(from: r.id, at: t)
+                    }
                 }
             }
             .onTapGesture(count: 1) { p in
@@ -54,18 +114,22 @@ struct TimelineView: View {
                 DragGesture(minimumDistance: 3)
                     .onChanged { g in
                         if let p = paint {
-                            paint = (p.ruleID, p.from, time(at: g.location.x, width: w))
+                            paint = (p.ruleID, p.kind, p.from, time(at: g.location.x, width: w))
                         } else if g.startLocation.y < laneY {
                             model.seek(to: time(at: g.location.x, width: w))
                         } else if let rule = lane(at: g.startLocation.y) {
-                            paint = (rule.id,
+                            let kind: PaintKind = { if case .vector = rule { return .vector }; return .bitstream }()
+                            paint = (rule.id, kind,
                                      time(at: g.startLocation.x, width: w),
                                      time(at: g.location.x, width: w))
                         }
                     }
                     .onEnded { _ in
                         if let p = paint {
-                            model.addRegion(to: p.ruleID, from: p.from, to: p.to)
+                            switch p.kind {
+                            case .bitstream: model.addRegion(to: p.ruleID, from: p.from, to: p.to)
+                            case .vector: model.addVectorRegion(to: p.ruleID, from: p.from, to: p.to)
+                            }
                         }
                         paint = nil
                     }
@@ -106,7 +170,7 @@ struct TimelineView: View {
         min(max(0, Double(x) / max(width, 1) * duration), duration)
     }
 
-    private func lane(at y: CGFloat) -> MoshRule? {
+    private func lane(at y: CGFloat) -> LaneRule? {
         let row = Int((Double(y) - laneY) / rowH)
         guard row >= 0, row < lanes.count else { return nil }
         return lanes[row]
@@ -176,7 +240,7 @@ struct TimelineView: View {
 
         for (row, rule) in lanes.enumerated() {
             let rect = rowRect(row, size)
-            let color = rule.kind.signalColor
+            let color = rule.color
 
             // The lane itself.
             ctx.fill(Path(rect), with: .color(Sungam.ink.opacity(0.035)))
@@ -215,7 +279,7 @@ struct TimelineView: View {
                 ctx.fill(Path(bar), with: .color(color))
             }
 
-            ctx.draw(Text(rule.kind.displayName.uppercased() + (live ? "  ALWAYS" : ""))
+            ctx.draw(Text(rule.displayName.uppercased() + (live ? "  ALWAYS" : ""))
                         .font(Sungam.mono(Sungam.text2xs))
                         .foregroundStyle(Sungam.ink62),
                      at: CGPoint(x: 6, y: rect.midY), anchor: .leading)

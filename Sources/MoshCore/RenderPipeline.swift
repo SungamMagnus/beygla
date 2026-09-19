@@ -9,6 +9,12 @@ public struct RenderRequest: Sendable {
     public var audioSource: URL?
     public var events: [TriggerEvent]
     public var rules: [MoshRule]
+    /// The second effect family — rewrites motion vectors inside frames
+    /// rather than reordering whole ones. Runs before the bitstream pass, on
+    /// the same source, so combining both costs no extra generation of lossy
+    /// re-encoding: the vector pass's own encode is the same one the
+    /// bitstream pass would otherwise have needed anyway.
+    public var vectorRules: [VectorRule]
     public var settings: MoshSettings
     /// Force keyframes at trigger times so `bloom` has something to strip.
     /// Without this a clip encoded with a single keyframe has nothing to bloom.
@@ -19,12 +25,14 @@ public struct RenderRequest: Sendable {
     public var seed: UInt64
 
     public init(input: URL, output: URL, events: [TriggerEvent], rules: [MoshRule],
+                vectorRules: [VectorRule] = [],
                 audioSource: URL? = nil,
                 settings: MoshSettings = .init(), seedKeyframesAtTriggers: Bool = true,
                 quality: Int = 3, previewWidth: Int? = nil,
                 trim: ClosedRange<Double>? = nil, seed: UInt64 = 0x4D05_4842) {
         self.input = input
         self.output = output
+        self.vectorRules = vectorRules
         self.audioSource = audioSource
         self.events = events
         self.rules = rules
@@ -49,6 +57,7 @@ public struct RenderReport: Sendable {
 public enum RenderStage: String, Sendable {
     case probing = "Reading source"
     case encoding = "Encoding moshable stream"
+    case vectorPass = "Rewriting motion vectors"
     case moshing = "Moshing frames"
     case decoding = "Rendering output"
     case done = "Done"
@@ -66,9 +75,16 @@ public enum RenderError: Error, LocalizedError {
 
 public final class RenderPipeline: @unchecked Sendable {
     private let tool: FFmpegTool
+    /// nil when the vector-effect tool was not found. A render with no
+    /// vector rules never touches it, so its absence only matters if the
+    /// project actually uses one.
+    private let vectorTool: FFglitchTool?
     private let token = ProcessToken()
 
-    public init(tool: FFmpegTool) { self.tool = tool }
+    public init(tool: FFmpegTool, vectorTool: FFglitchTool? = nil) {
+        self.tool = tool
+        self.vectorTool = vectorTool
+    }
 
     /// Kills the running ffmpeg immediately rather than waiting for the current
     /// stage to finish on its own.
@@ -127,10 +143,7 @@ public final class RenderPipeline: @unchecked Sendable {
         }
         try checkCancelled()
 
-        // 2. Byte surgery.
-        progress(.init(stage: .moshing, fraction: 0))
-        let data = try Data(contentsOf: rawAVI, options: .mappedIfSafe)
-        let doc = try AVIDocument(data: data)
+        var doc = try AVIDocument(data: try Data(contentsOf: rawAVI, options: .mappedIfSafe))
         let keysBefore = doc.keyframeIndices.count
 
         let trimBase = request.trim?.lowerBound ?? 0
@@ -139,6 +152,47 @@ public final class RenderPipeline: @unchecked Sendable {
             c.time -= trimBase
             return c
         }
+
+        // 2. Vector pass — rewrites motion vectors inside frames, if any rule
+        // asked for one. Runs before the bitstream pass so both families can
+        // be combined at the cost of exactly one extra encode generation (the
+        // one `ffgac` needs to force a vector onto every macroblock), not two
+        // independent renders' worth.
+        let vectorOps = VectorTriggerCompiler.compile(events: shifted, rules: request.vectorRules,
+                                                       frameRate: doc.frameRate,
+                                                       frameCount: doc.frameCount,
+                                                       seed: request.seed)
+        if !vectorOps.isEmpty {
+            guard let vectorTool else { throw FFglitchError.notInstalled }
+            progress(.init(stage: .vectorPass, fraction: 0))
+
+            let rawYUV = work.appendingPathComponent("vector.yuv")
+            let editedStream = work.appendingPathComponent("vector.m4v")
+            let vectorAVI = work.appendingPathComponent("vector.avi")
+
+            try tool.decodeToRawYUV(input: rawAVI, output: rawYUV,
+                                    width: doc.width, height: doc.height, token: token)
+            try checkCancelled()
+
+            let script = VectorEngine.generateScript(ops: vectorOps, frameCount: doc.frameCount)
+            try vectorTool.moshVectors(rawYUV: rawYUV, width: doc.width, height: doc.height,
+                                       frameRate: doc.frameRate, script: script,
+                                       quality: request.quality, token: token,
+                                       output: editedStream)
+            try checkCancelled()
+
+            try tool.remuxToAVI(elementaryStream: editedStream, output: vectorAVI,
+                               frameRate: doc.frameRate, token: token)
+            try checkCancelled()
+
+            // Re-parse: same frame count, edited payload bytes. The bitstream
+            // pass below (if any) now sees the vector-moshed picture.
+            doc = try AVIDocument(data: try Data(contentsOf: vectorAVI, options: .mappedIfSafe))
+            progress(.init(stage: .vectorPass, fraction: 1))
+        }
+
+        // 3. Byte surgery.
+        progress(.init(stage: .moshing, fraction: 0))
         let ops = TriggerCompiler.compile(events: shifted, rules: request.rules,
                                           frameRate: doc.frameRate,
                                           frameCount: doc.frameCount,

@@ -51,6 +51,11 @@ public final class AppModel: ObservableObject {
     }
     @Published public var events: [TriggerEvent] = []
     @Published public var rules: [MoshRule] = MoshRule.defaultSet()
+    /// The second effect family — motion vectors rewritten inside frames.
+    /// Empty by default: it needs the vector engine (ffgac/ffedit), which is
+    /// a separate optional download, so a project that never touches this
+    /// renders exactly as it always did.
+    @Published public var vectorRules: [VectorRule] = []
     @Published public var moshSettings = MoshSettings()
 
     /// While armed, live audio and MIDI hits are written into `events` at the
@@ -78,7 +83,9 @@ public final class AppModel: ObservableObject {
     public let midiInput = MIDIInput()
     public let player = AVPlayer()
     public private(set) var tool: FFmpegTool?
+    public private(set) var vectorTool: FFglitchTool?
     public var ffmpegMissing: Bool { tool == nil }
+    public var vectorEngineMissing: Bool { vectorTool == nil }
     /// Which ffmpeg is doing the work and what it will encode with — worth
     /// stating, because a bundled LGPL build has no libx264 and reaches for
     /// VideoToolbox instead.
@@ -94,6 +101,7 @@ public final class AppModel: ObservableObject {
 
     public init() {
         tool = FFmpegTool.locate(bundledIn: Bundle.main.resourceURL)
+        vectorTool = FFglitchTool.locate(bundledIn: Bundle.main.resourceURL)
 
         // AudioInput and MIDIInput publish their own state. Without forwarding
         // it, the level meter and the device list would sit frozen: SwiftUI is
@@ -274,6 +282,20 @@ public final class AppModel: ObservableObject {
         rules[i].activeRegions.removeAll()
     }
 
+    // Same three, for a vector rule's lane. Kept as a twin rather than a
+    // shared generic — see the note on VectorRuleRow.
+    public func addVectorRegion(to ruleID: UUID, from: Double, to: Double) {
+        guard let i = vectorRules.firstIndex(where: { $0.id == ruleID }) else { return }
+        guard abs(to - from) > 0.02 else { return }
+        vectorRules[i].activeRegions.append(ActiveRegion(start: from, end: to))
+        vectorRules[i].activeRegions.sort { $0.start < $1.start }
+    }
+
+    public func removeVectorRegion(from ruleID: UUID, at time: Double) {
+        guard let i = vectorRules.firstIndex(where: { $0.id == ruleID }) else { return }
+        vectorRules[i].activeRegions.removeAll { $0.contains(time) }
+    }
+
     // MARK: - Transport
 
     public func togglePlay() {
@@ -302,6 +324,7 @@ public final class AppModel: ObservableObject {
         renderStage = RenderStage.probing.rawValue
 
         var request = RenderRequest(input: url, output: output, events: events, rules: rules)
+        request.vectorRules = vectorRules
         request.audioSource = audioURL
         request.settings = moshSettings
         // A preview trades resolution for turnaround; the mosh itself is
@@ -309,7 +332,7 @@ public final class AppModel: ObservableObject {
         request.previewWidth = preview ? 640 : nil
         request.quality = preview ? 5 : 3
 
-        let pipeline = RenderPipeline(tool: tool)
+        let pipeline = RenderPipeline(tool: tool, vectorTool: vectorTool)
         self.pipeline = pipeline
 
         Task.detached(priority: .userInitiated) {

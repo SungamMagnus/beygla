@@ -50,13 +50,59 @@ Grouped by what they do to the frame array, which is also how they are coloured.
 | **Shuffle** | Permutes the delta frames individually. |
 | **Blocks** | Shuffles in blocks, so motion stays coherent inside each and only the joins are wrong. |
 
-The frame-level modes come from
+The frame-level modes above come from
 [Datamosher Pro](https://github.com/Akascape/Datamosher-Pro) and the Tomato
-automosher it builds on. Its other half — Sink, Shear, Zoom, Slice, Stop,
-Fluid, Motion Transfer and the rest — rewrites the motion vectors *inside*
-frames rather than reordering whole ones, which needs
-[FFglitch](https://ffglitch.org) as a separate binary. Those are not
-implemented here.
+automosher it builds on. Its other half rewrites the motion vectors *inside*
+frames rather than reordering whole ones — a genuinely different mechanism,
+covered next.
+
+### Vector effects — rewriting motion, not frames
+
+Eleven more effects, ported from the FFglitch scripts under
+`DatamoshLib/FFG_effects/jscripts/` in Datamosher Pro. Where the effects above
+treat a compressed frame as an opaque blob and only ever move, hold or delete
+whole ones, these decode a frame just far enough to expose its motion vectors
+as a plain array, run a transform over that array, and re-encode with the
+edited vectors instead of the real ones. It is a genuine decode/edit/re-encode
+pass, not byte surgery, so it needs its own tool —
+[FFglitch](https://ffglitch.org)'s `ffgac` and `ffedit` — and its own optional
+download (`./tools/build-ffglitch.sh`); Beygla runs exactly as before without
+it, just with these eleven effects unavailable.
+
+| Effect | What happens to the motion field |
+|---|---|
+| **Sink** | Freezes anything moving faster than a threshold; slow motion is untouched. |
+| **Stop** | Freezes every block's motion, unconditionally. |
+| **Invert** | Negates every vector — right becomes left, up becomes down. |
+| **Mirror** | Reflects the motion field left to right. |
+| **Vibrate** | Adds an independent random jitter to every block, every frame. |
+| **Zoom** | Adds an outward (or, at low amount, inward) radial push from centre. |
+| **Slam Zoom** | Replaces motion with a pure radial field instead of adding to it. |
+| **Shear** | Adds a diagonal offset that grows with distance from centre. |
+| **Delay** | Replaces each block's vector with one from several frames ago; Amount past halfway blends a feedback trail instead of a hard swap. |
+| **Shift** | Feeds vertical motion into the next frame with a constant added each time, like gravity accelerating a fall. |
+| **Noise** | Multiplies the *slowest*-moving blocks instead of the fastest — the inverse of what a glitch usually does. |
+
+Each DMP script carried its own random-threshold self-triggering — "do this
+for N frames if a coin flip exceeds 95" — because the tool it was written for
+had no other way to place an effect in time. Beygla already has one: the same
+trigger, rule, timeline-lane and region system that drives the bitstream
+effects drives these too, so that scaffolding is dropped and only the vector
+transform itself is kept. `Buffer.js`'s feedback behaviour survives as
+Delay's `Amount` knob crossing 0.5 rather than as a thirteenth separate effect,
+since the two DMP scripts differ by one line.
+
+A vector value the frame's own encoder precision cannot represent does not
+fail cleanly on import — it decodes as a handful of visibly corrupted
+macroblocks scattered through an otherwise correct picture. Every effect's
+output is clamped against `mv.fcode`, the exact range that frame's MPEG-4
+encoding allows, which is exposed directly in FFglitch's own JSON export.
+
+Combining a vector rule and a bitstream rule in one render costs exactly one
+extra encode generation — the one `ffgac` needs to force a vector onto every
+macroblock — not two independent renders' worth: the vector pass runs first,
+its output is remuxed into an AVI losslessly, and the bitstream engine's own
+byte surgery runs on that exactly the way it runs on any other moshable AVI.
 
 ### Where each effect is live
 
@@ -160,15 +206,18 @@ so the tail of a hit doesn't re-arm it.
 Requires macOS 14+ and the Xcode command line tools.
 
 ```bash
-./tools/build-ffmpeg.sh   # once — builds the ffmpeg that ships inside the app
+./tools/build-ffmpeg.sh    # once — builds the ffmpeg that ships inside the app
+./tools/build-ffglitch.sh  # once — builds the vector-effect engine (optional)
 ./build.sh --universal
 ```
 
 That produces `build/Beygla.app` and `build/beyglactl`. `build.sh` bundles
-`vendor/ffmpeg` into the app when it is there, so the result needs nothing
-installed. Skip the first step and the app falls back to whatever ffmpeg is on
-`PATH` or in the usual Homebrew locations — `brew install ffmpeg` if you would
-rather do it that way.
+`vendor/ffmpeg` and `vendor/ffglitch` into the app when they are there, so the
+result needs nothing installed. Skip a step and the app falls back to whatever
+is on `PATH` or in the usual Homebrew locations for the first, or simply runs
+without the eleven vector effects for the second — `brew install ffmpeg` if
+you would rather do it that way for the main engine (there is no Homebrew
+formula for FFglitch; building is the only option there).
 
 ### Why ffmpeg is built rather than copied
 
@@ -187,6 +236,22 @@ asks for is switched off, which is what keeps it small.
 Beygla adapts to whichever binary it finds: with libx264 it encodes the
 deliverable at a CRF, and without it uses `h264_videotoolbox` on an inverted
 quality scale. The Stream panel names the one in use.
+
+### Building the vector engine
+
+`tools/build-ffglitch.sh` clones
+[ramiropolla/ffglitch-core](https://github.com/ramiropolla/ffglitch-core) and
+builds it the same way — `--disable-gpl`, static, universal, everything
+unused switched off — producing `ffgac` (its own ffmpeg, built with the
+`+forcemv` flag that puts a motion vector on every macroblock) and `ffedit`
+(exports/imports those vectors as JSON, running a QuickJS script over them in
+between). QuickJS turns out to be vendored inside `libavutil` in that source
+tree, so this is one build, not the second dependency it looks like from
+outside.
+
+```bash
+./tools/build-ffglitch.sh
+```
 
 ---
 
@@ -257,6 +322,9 @@ beyglactl render clip.mp4 out.mp4 \
 beyglactl render clip.mp4 out.mp4 \
     --effect jiggle --live 2.0-4.0         # only fire inside a span
 beyglactl render clip.mp4 out.mp4 \
+    --vector-effect sink --vector-dur 0.3  # a vector effect
+beyglactl list-vector-effects              # print all eleven, with their DMP source
+beyglactl render clip.mp4 out.mp4 \
     --cancel-after 2                       # debug: prove cancelling kills ffmpeg
 ```
 
@@ -270,11 +338,14 @@ Sources/MoshCore/          # no UI, no AppKit — all of it testable from beygla
   MPEG4.swift              #   VOP type classification
   MPEG4Skip.swift          #   VOL bit-parsing, skip-VOP synthesis
   AVIDocument.swift        #   the AVI as an array of frames
-  MoshEngine.swift         #   the seven effects
+  MoshEngine.swift         #   the fifteen bitstream effects
+  VectorOps.swift          #   the eleven vector effects: kinds, ops, rules
+  VectorEngine.swift       #   generates the QuickJS driver ffedit runs
+  FFglitchTool.swift       #   wraps ffgac / ffedit
   OnsetDetector.swift      #   spectral flux, offline + live
   Triggers.swift           #   events, rules, and compiling one into ops
-  FFmpegTool.swift         #   encode / decode / probe / PCM extraction
-  RenderPipeline.swift     #   the three stages, with progress and cancellation
+  FFmpegTool.swift         #   encode / decode / probe / PCM extraction / remux
+  RenderPipeline.swift     #   the stages, with progress and cancellation
 Sources/Beygla/            # SwiftUI app
   SungamKit.swift          #   the design system, ported to SwiftUI
 Sources/beyglactl/           # command line front end
@@ -346,3 +417,7 @@ they do to the frame array, and each family takes one hue:
   there's no UI for a clip list.
 - **Ad-hoc signed.** Fine locally; it needs a Developer ID to hand to anyone
   else.
+- **Vector effects need a second optional download.** `./tools/build-ffglitch.sh`
+  is a separate step from the main engine — a source clone and build of its
+  own — because FFglitch is a genuinely different fork of ffmpeg, not an extra
+  flag on the one Beygla already bundles.

@@ -43,6 +43,11 @@ func usage() -> Never {
                                      instead of detecting them
           --live 2.0-4.0,6.0-7.0     only let the effect fire inside these spans
           --purge                    strip every keyframe in the clip
+          --vector-effect KIND       add a vector effect (needs ffgac/ffedit)
+                                     sink|stop|invertReverse|mirror|vibrate|
+                                     zoom|slamZoom|shear|delay|shift|noise
+          --vector-dur 0.3           vector effect length in seconds
+          --list-vector-effects      print all vector effects and exit
           --cancel-after 1.5         debug: cancel mid-render, to check that
                                      cancelling actually kills ffmpeg
     """)
@@ -57,6 +62,7 @@ guard let tool = FFmpegTool.locate() else {
     FileHandle.standardError.write(Data("error: \(FFmpegError.notInstalled.localizedDescription)\n".utf8))
     exit(2)
 }
+let vectorTool = FFglitchTool.locate()
 
 func flag(_ name: String) -> Bool {
     if let i = args.firstIndex(of: "--\(name)") { args.remove(at: i); return true }
@@ -72,6 +78,13 @@ func option(_ name: String) -> String? {
 
 do {
     switch command {
+    case "list-vector-effects":
+        for kind in VectorOpKind.allCases {
+            print("\(kind.rawValue.padding(toLength: 14, withPad: " ", startingAt: 0)) "
+                + "\(kind.displayName.padding(toLength: 12, withPad: " ", startingAt: 0)) "
+                + "from \(kind.source)")
+        }
+
     case "info":
         guard let path = args.first else { usage() }
         let url = URL(fileURLWithPath: path)
@@ -127,6 +140,8 @@ do {
         let quality = option("quality").flatMap { Int($0) } ?? 3
         let purge = flag("purge")
         let audioOverride = option("audio").map { URL(fileURLWithPath: $0) }
+        let vectorKindRaw = option("vector-effect")
+        let vectorDuration = option("vector-dur").flatMap { Double($0) } ?? 0.3
 
         // The detector listens to whatever will end up on the render.
         let manualTimes = option("at")?
@@ -168,11 +183,26 @@ do {
         var request = RenderRequest(input: input, output: output, events: events, rules: rules)
         request.audioSource = audioOverride
         request.settings = MoshSettings(purgeAllKeyframes: purge)
+
+        if let raw = vectorKindRaw {
+            guard let vKind = VectorOpKind(rawValue: raw) else {
+                FileHandle.standardError.write(Data(
+                    "error: unknown vector effect '\(raw)' — see --list-vector-effects\n".utf8))
+                exit(1)
+            }
+            guard vectorTool != nil else {
+                FileHandle.standardError.write(Data(
+                    "error: \(FFglitchError.notInstalled.localizedDescription)\n".utf8))
+                exit(1)
+            }
+            request.vectorRules = [VectorRule(kind: vKind, source: .audio,
+                                              band: onsetSettings.band, duration: vectorDuration)]
+        }
         request.quality = quality
         request.previewWidth = width
 
         let reporter = StageReporter()
-        let pipeline = RenderPipeline(tool: tool)
+        let pipeline = RenderPipeline(tool: tool, vectorTool: vectorTool)
 
         if let after = option("cancel-after").flatMap({ Double($0) }) {
             let started = Date()

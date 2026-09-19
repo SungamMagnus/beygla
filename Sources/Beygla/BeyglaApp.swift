@@ -23,6 +23,12 @@ struct BeyglaApp: App {
             } else {
                 print("source:  none")
             }
+            if let v = FFglitchTool.locate(bundledIn: Bundle.main.resourceURL) {
+                print("vector:  bundled")
+                print("ffgac:   \(v.ffgac.path)")
+            } else {
+                print("vector:  none")
+            }
             exit(0)
         }
     }
@@ -105,4 +111,14 @@ extension MoshOpKind {
             return "reorders"
         }
     }
+}
+
+// VectorOpKind gets its own colour, kept apart from the bitstream family's
+// coral/teal/steel so a timeline lane makes plain at a glance which engine a
+// rule runs through. Lilac is the system's pale-trim colour, otherwise unused
+// on this panel, which is exactly the "subordinate, secondary process" register
+// the vector pass occupies relative to the bitstream engine that is Beygla's
+// primary instrument.
+extension VectorOpKind {
+    var signalColor: Color { Sungam.lilacText }
 }
