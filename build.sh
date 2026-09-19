@@ -4,13 +4,19 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 CONFIG=release
-[[ "${1:-}" == "--debug" ]] && CONFIG=debug
+ARCHS=()
+for arg in "$@"; do
+  case "$arg" in
+    --debug)     CONFIG=debug ;;
+    --universal) ARCHS=(--arch arm64 --arch x86_64) ;;
+  esac
+done
 
-echo "==> Building ($CONFIG)"
-swift build -c "$CONFIG" --product Beygla
-swift build -c "$CONFIG" --product beyglactl
+echo "==> Building ($CONFIG${ARCHS:+, universal})"
+swift build -c "$CONFIG" "${ARCHS[@]}" --product Beygla
+swift build -c "$CONFIG" "${ARCHS[@]}" --product beyglactl
 
-BIN="$(swift build -c "$CONFIG" --show-bin-path)"
+BIN="$(swift build -c "$CONFIG" "${ARCHS[@]}" --show-bin-path)"
 APP="build/Beygla.app"
 
 echo "==> Assembling $APP"
@@ -40,5 +46,5 @@ codesign --force --sign - --timestamp=none "$APP" >/dev/null 2>&1 || \
 cp "$BIN/beyglactl" build/beyglactl
 
 echo "==> Done"
-echo "    app:  $APP"
+echo "    app:  $APP  ($(lipo -archs "$APP/Contents/MacOS/Beygla"))"
 echo "    cli:  build/beyglactl"
