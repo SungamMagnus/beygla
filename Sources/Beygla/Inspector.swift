@@ -251,29 +251,17 @@ struct Inspector: View {
 
     private var effectsPanel: some View {
         PanelFrame(title: "Effects", color: Sungam.teal) {
-            VStack(alignment: .leading, spacing: 10) {
-                if model.rules.isEmpty {
-                    Text("No effects. Add one below.")
-                        .font(Sungam.mono(Sungam.textSm))
-                        .foregroundStyle(Sungam.ink38)
-                }
-
-                ForEach($model.rules) { $rule in
-                    RuleRow(rule: $rule, lastNote: model.midiInput.lastNote?.number) {
-                        model.rules.removeAll { $0.id == rule.id }
-                    }
-                }
-
-                Rectangle().fill(Sungam.ink13).frame(height: Sungam.hairline)
-
-                Text("ADD")
+            VStack(alignment: .leading, spacing: 12) {
+                // The whole palette sits above the rules it builds, so what is
+                // available is visible without opening anything.
+                Text("AVAILABLE")
                     .font(Sungam.mono(Sungam.text2xs))
                     .tracking(Sungam.text2xs * Sungam.scale * 0.08)
                     .foregroundStyle(Sungam.ink45)
 
-                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 4),
-                          spacing: 6) {
-                    ForEach(MoshOpKind.allCases) { kind in
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 5), count: 4),
+                          spacing: 5) {
+                    ForEach(MoshOpKind.byFamily) { kind in
                         LatchButton(label: kind.displayName, color: kind.signalColor) {
                             model.rules.append(
                                 MoshRule(kind: kind, source: model.triggerSource,
@@ -281,6 +269,45 @@ struct Inspector: View {
                                                ? model.onsetSettings.band : nil)
                             )
                         }
+                    }
+                }
+
+                HStack(spacing: 12) {
+                    ForEach(["strips": Sungam.coral, "holds": Sungam.teal,
+                             "reorders": Sungam.steel].sorted(by: { $0.key < $1.key }),
+                            id: \.key) { name, color in
+                        HStack(spacing: 5) {
+                            Lamp(on: true, color: color, size: 6)
+                            Text(name.uppercased())
+                                .font(Sungam.mono(Sungam.text2xs))
+                                .tracking(Sungam.text2xs * Sungam.scale * 0.06)
+                                .foregroundStyle(Sungam.ink45)
+                        }
+                    }
+                }
+
+                Rectangle().fill(Sungam.ink13).frame(height: Sungam.hairline)
+
+                Text("IN USE")
+                    .font(Sungam.mono(Sungam.text2xs))
+                    .tracking(Sungam.text2xs * Sungam.scale * 0.08)
+                    .foregroundStyle(Sungam.ink45)
+
+                if model.rules.isEmpty {
+                    Text("None. Add one above.")
+                        .font(Sungam.mono(Sungam.textSm))
+                        .foregroundStyle(Sungam.ink38)
+                } else {
+                    Text("Drag across an effect's lane on the timeline to set where it is live. Double-click a span to remove it.")
+                        .font(Sungam.mono(Sungam.text2xs))
+                        .foregroundStyle(Sungam.ink45)
+                        .lineSpacing(3)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                ForEach($model.rules) { $rule in
+                    RuleRow(rule: $rule, lastNote: model.midiInput.lastNote?.number) {
+                        model.rules.removeAll { $0.id == rule.id }
                     }
                 }
             }
@@ -338,6 +365,13 @@ struct RuleRow: View {
 
                 Spacer()
 
+                Text(rule.activeRegions.isEmpty
+                     ? "ALWAYS"
+                     : "\(rule.activeRegions.count) SPAN\(rule.activeRegions.count == 1 ? "" : "S")")
+                    .font(Sungam.mono(Sungam.text2xs))
+                    .foregroundStyle(rule.activeRegions.isEmpty ? Sungam.ink38
+                                                                : rule.kind.signalColor)
+
                 Text(String(format: "%.0fMS", rule.duration * 1000))
                     .font(Sungam.mono(Sungam.text2xs))
                     .foregroundStyle(Sungam.ink62)
@@ -347,6 +381,16 @@ struct RuleRow: View {
             }
 
             if expanded {
+                if !rule.activeRegions.isEmpty {
+                    HStack(spacing: 8) {
+                        Text("Live only inside the painted spans.")
+                            .font(Sungam.mono(Sungam.text2xs))
+                            .foregroundStyle(Sungam.ink55)
+                        Spacer()
+                        LatchButton(label: "Always") { rule.activeRegions.removeAll() }
+                    }
+                }
+
                 Text(rule.kind.blurb)
                     .font(Sungam.mono(Sungam.textSm))
                     .foregroundStyle(Sungam.ink70)

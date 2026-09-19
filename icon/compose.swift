@@ -23,7 +23,7 @@ func load(_ name: String) -> CGImage {
     return NSBitmapImageRep(data: d as Data)!.cgImage!
 }
 
-let moshed = load("f12.png")     // most torn — still legible large
+let moshed = load("f11.png")     // most torn that still reads as a letter
 let torn = load("f10.png")       // calmer — for the middle sizes
 let plain = load("plate_a.png")  // the untouched letterform
 
@@ -32,6 +32,8 @@ let ink = NSColor(srgbRed: 0.102, green: 0.102, blue: 0.090, alpha: 1)
 let coral = NSColor(srgbRed: 0.929, green: 0.506, blue: 0.349, alpha: 1)
 let teal = NSColor(srgbRed: 0.322, green: 0.690, blue: 0.643, alpha: 1)
 let steel = NSColor(srgbRed: 0.310, green: 0.494, blue: 0.659, alpha: 1)
+let violet = NSColor(srgbRed: 0.420, green: 0.357, blue: 0.769, alpha: 1)
+let amber = NSColor(srgbRed: 0.753, green: 0.553, blue: 0.086, alpha: 1)
 
 /// The letterform sits slightly below centre in the plate; crop around it so it
 /// fills the tile rather than floating in it.
@@ -105,8 +107,9 @@ func render(size: Int) -> Data {
         case ...32:
             bands = [(0.34, 0.075, teal, 0.030), (0.58, 0.085, coral, -0.026)]
         default:
-            bands = [(0.30, 0.050, steel, -0.030), (0.45, 0.070, coral, 0.042),
-                     (0.66, 0.055, teal, -0.028)]
+            bands = [(0.24, 0.045, violet, 0.026), (0.36, 0.050, steel, -0.030),
+                     (0.48, 0.070, coral, 0.042), (0.62, 0.042, amber, 0.022),
+                     (0.72, 0.055, teal, -0.028)]
         }
 
         for (yFrac, hFrac, color, shift) in bands {

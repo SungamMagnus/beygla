@@ -35,9 +35,9 @@ CLI=build/beyglactl
 "$CLI" render "$W/source.mp4" "$W/moshed.mp4" --at 0.3333 --effect bloom --dur 1.0 --quality 4
 
 echo "==> Pulling frames"
-# 10 is the calmer tear used at the middle sizes; 12 is the one the large
-# sizes are cut from.
-for n in 10 12; do
+# 10 is the calmer tear used at the middle sizes; 11 is the one the large
+# sizes are cut from. Past 12 the bands crowd the letter off the tile.
+for n in 10 11; do
   ffmpeg -y -v error -i "$W/moshed.mp4" -vf "select='eq(n\,$n)'" -frames:v 1 "$W/f$n.png"
 done
 

@@ -51,7 +51,7 @@
   </section>
 
   <section class="panel teal">
-    <span class="title">The seven effects</span>
+    <span class="title">Fifteen effects</span>
     <p>
       A compressed stream has two kinds of frame. A <strong>keyframe</strong> is a
       whole picture. A <strong>delta frame</strong> carries only motion vectors and
@@ -61,7 +61,11 @@
     </p>
     <p>
       Colour groups them by what they do to the frame array: one hue for stripping
-      reference frames, one for holding and repeating, one for reordering.
+      reference frames, one for holding and repeating, one for reordering. Each
+      is a rule with a length, an amount and four modulation parameters, and each
+      has its own lane on the timeline — drag across a lane to set where that
+      effect is live, so a set of effects takes turns over a clip instead of all
+      of them firing on every hit.
     </p>
 
     <div class="effects">
@@ -71,90 +75,119 @@
           <span class="nm" style="color:var(--coral)">Bloom</span>
           <span class="fam">strips</span>
         </div>
-        <p>Deletes the keyframes inside the range. With no whole picture to reset
-        to, the incoming scene's motion vectors are applied to the outgoing
-        scene's pixels: the old image gets dragged around by the new image's
-        movement, holding its colours while taking on the wrong shape. It bites
-        hardest at a hard cut, where the two pictures have nothing in common.</p>
+        <p>Deletes the keyframes in range, so the incoming scene's motion lands on the outgoing scene's pixels.</p>
       </div>
-
+      <div class="effect">
+        <div class="head">
+          <svg class="lamp" viewBox="0 0 9 9"><rect width="9" height="9" fill="var(--coral)"/></svg>
+          <span class="nm" style="color:var(--coral)">Void</span>
+          <span class="fam">strips</span>
+        </div>
+        <p>Kills every frame carrying more data than a threshold — keyframes first, then the heavy refresh frames.</p>
+      </div>
       <div class="effect">
         <div class="head">
           <svg class="lamp" viewBox="0 0 9 9"><rect width="9" height="9" fill="var(--teal)"/></svg>
           <span class="nm" style="color:var(--teal)">Glide</span>
           <span class="fam">holds</span>
         </div>
-        <p>Picks the last delta frame before the range and re-applies that same
-        one for every frame in it. The decoder keeps shifting pixels in the one
-        direction that frame described, so the picture slides steadily and smears
-        into itself. It does not decay — a longer range drifts further, and the
-        image eventually pulls apart.</p>
+        <p>Holds one delta frame and re-applies it, so the picture slides steadily in one direction.</p>
       </div>
-
       <div class="effect">
         <div class="head">
           <svg class="lamp" viewBox="0 0 9 9"><rect width="9" height="9" fill="var(--teal)"/></svg>
           <span class="nm" style="color:var(--teal)">Echo</span>
           <span class="fam">holds</span>
         </div>
-        <p>Loops the first few delta frames of the range over and over. The same
-        short burst of motion replays on an ever-changing picture, so the image
-        churns in a cycle instead of drifting one way. Amount sets the loop
-        length: low is a tight flutter, high is a longer repeating phrase.</p>
+        <p>Loops the first few delta frames, so the image churns in a cycle rather than drifting.</p>
       </div>
-
       <div class="effect">
         <div class="head">
           <svg class="lamp" viewBox="0 0 9 9"><rect width="9" height="9" fill="var(--teal)"/></svg>
           <span class="nm" style="color:var(--teal)">Stutter</span>
           <span class="fam">holds</span>
         </div>
-        <p>Keeps one frame in every few and replaces the rest with skip frames, so
-        the picture updates in steps rather than continuously. The result is a
-        hard rhythmic judder that holds dead still between updates. Amount sets
-        the step: higher holds longer and reads slower and coarser.</p>
+        <p>Keeps one frame in every few and skips the rest: a hard judder that holds still between updates.</p>
       </div>
-
+      <div class="effect">
+        <div class="head">
+          <svg class="lamp" viewBox="0 0 9 9"><rect width="9" height="9" fill="var(--teal)"/></svg>
+          <span class="nm" style="color:var(--teal)">Freeze</span>
+          <span class="fam">holds</span>
+        </div>
+        <p>Every frame replaced with a skip frame. Motion stops dead and nothing smears.</p>
+      </div>
+      <div class="effect">
+        <div class="head">
+          <svg class="lamp" viewBox="0 0 9 9"><rect width="9" height="9" fill="var(--teal)"/></svg>
+          <span class="nm" style="color:var(--teal)">Overlap</span>
+          <span class="fam">holds</span>
+        </div>
+        <p>Runs that double back: each one replays part of the one before, stacking partial movements.</p>
+      </div>
       <div class="effect">
         <div class="head">
           <svg class="lamp" viewBox="0 0 9 9"><rect width="9" height="9" fill="var(--steel)"/></svg>
           <span class="nm" style="color:var(--steel)">Reverse</span>
           <span class="fam">reorders</span>
         </div>
-        <p>Plays the range's delta frames back to front. Motion that was pushing
-        one way now pulls the other, against a picture that never reset, so shapes
-        crawl backwards through themselves. Any keyframe landing inside the
-        reversed run is neutralised — left in, it would snap the picture back.</p>
+        <p>The range's delta frames back to front, so shapes crawl backwards through themselves.</p>
       </div>
-
+      <div class="effect">
+        <div class="head">
+          <svg class="lamp" viewBox="0 0 9 9"><rect width="9" height="9" fill="var(--steel)"/></svg>
+          <span class="nm" style="color:var(--steel)">Invert</span>
+          <span class="fam">reorders</span>
+        </div>
+        <p>Each frame swapped with its neighbour — motion advances then corrects, one frame out of step.</p>
+      </div>
+      <div class="effect">
+        <div class="head">
+          <svg class="lamp" viewBox="0 0 9 9"><rect width="9" height="9" fill="var(--steel)"/></svg>
+          <span class="nm" style="color:var(--steel)">Weave</span>
+          <span class="fam">reorders</span>
+        </div>
+        <p>Interleaves the range with itself reversed: two contradictory directions on alternate frames.</p>
+      </div>
+      <div class="effect">
+        <div class="head">
+          <svg class="lamp" viewBox="0 0 9 9"><rect width="9" height="9" fill="var(--steel)"/></svg>
+          <span class="nm" style="color:var(--steel)">Jiggle</span>
+          <span class="fam">reorders</span>
+        </div>
+        <p>Each frame displaced in time by a gaussian amount. Motion stumbles rather than tears.</p>
+      </div>
+      <div class="effect">
+        <div class="head">
+          <svg class="lamp" viewBox="0 0 9 9"><rect width="9" height="9" fill="var(--steel)"/></svg>
+          <span class="nm" style="color:var(--steel)">Sort</span>
+          <span class="fam">reorders</span>
+        </div>
+        <p>Reordered by frame size — by how violent each moment was. Gathers into a burst, or decays from one.</p>
+      </div>
+      <div class="effect">
+        <div class="head">
+          <svg class="lamp" viewBox="0 0 9 9"><rect width="9" height="9" fill="var(--steel)"/></svg>
+          <span class="nm" style="color:var(--steel)">Rise</span>
+          <span class="fam">reorders</span>
+        </div>
+        <p>Skips forward through the range, then holds on the last frame reached.</p>
+      </div>
       <div class="effect">
         <div class="head">
           <svg class="lamp" viewBox="0 0 9 9"><rect width="9" height="9" fill="var(--steel)"/></svg>
           <span class="nm" style="color:var(--steel)">Shuffle</span>
           <span class="fam">reorders</span>
         </div>
-        <p>Randomly permutes the delta frames in the range, so each frame's motion
-        is applied at the wrong moment to the wrong picture. The image tears into
-        blocks that drift independently. The render is seeded, so the same project
-        always produces the same scramble.</p>
+        <p>Frames permuted individually, so the image tears into independently drifting blocks.</p>
       </div>
-
       <div class="effect">
         <div class="head">
-          <svg class="lamp" viewBox="0 0 9 9"><rect width="9" height="9" fill="var(--paper)" stroke="var(--teal)" stroke-opacity=".45"/></svg>
-          <span class="nm" style="color:var(--teal)">Freeze</span>
-          <span class="fam">holds</span>
+          <svg class="lamp" viewBox="0 0 9 9"><rect width="9" height="9" fill="var(--steel)"/></svg>
+          <span class="nm" style="color:var(--steel)">Blocks</span>
+          <span class="fam">reorders</span>
         </div>
-        <p>Replaces every frame in the range with a skip frame, which tells the
-        decoder the picture is unchanged. Motion stops dead and nothing smears —
-        the one effect here that holds perfectly still. Useful as a held beat
-        between two moving ones.</p>
-      </div>
-
-      <div class="effect" style="display:flex;align-items:center">
-        <p style="color:var(--ink-45)">Each effect is a rule. A rule has a length, an
-        amount, and four modulation parameters that let trigger velocity, chance,
-        jitter and timing offset move it.</p>
+        <p>Shuffled in blocks, so motion stays coherent inside each one and only the joins are wrong.</p>
       </div>
     </div>
   </section>
@@ -339,6 +372,14 @@ cd beygla &amp;&amp; ./build.sh</pre>
         <div class="v">Arming records your performance against the playhead; the render
           happens after. Real-time moshed output is possible with the same engine, but
           it is not built yet.</div>
+      </div>
+      <div class="row">
+        <div class="k">Motion vectors</div>
+        <div class="v">Beygla rewrites whole frames. Datamosher Pro's other half —
+          Sink, Shear, Zoom, Slice, Stop, Fluid, Motion Transfer and the rest —
+          rewrites the motion vectors inside them, which needs
+          <a href="https://ffglitch.org">FFglitch</a> as a separate binary. Those
+          are not implemented here.</div>
       </div>
       <div class="row">
         <div class="k">Single clip</div>

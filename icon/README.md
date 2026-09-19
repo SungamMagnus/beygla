@@ -11,15 +11,15 @@ plate B ──┘
 **Plate A** is the letter B, set in Menlo Bold on the system's paper. These are
 the pixels that end up in the icon.
 
-**Plate B** is a field of hard-edged bands in the signal palette, panned
-diagonally. Nothing from it survives into the icon. It exists only to supply
+**Plate B** is a field of hard-edged bands carrying the whole Signal palette —
+coral, teal, steel, violet, amber and lilac — panned diagonally. Nothing from it survives into the icon. It exists only to supply
 motion vectors with a strong, coherent direction.
 
 The two are concatenated into one clip with a hard cut between them. Beygla's
 own engine forces a keyframe at that cut and then strips it — a `bloom`, the
 same op the app performs — so the bands' motion vectors are applied to the
-letter's pixels instead of their own. Frames 10 and 12 past the cut are where
-the letter has been dragged into blocks while still reading as a B.
+letter's pixels instead of their own. Frames 10 and 11 past the cut are where the letter has been dragged into
+blocks while still reading as a B. Past 12 the bands crowd it off the tile.
 
 Rebuild it with:
 
@@ -39,7 +39,7 @@ Dock has failed at its only job.
 
 | Size | Art |
 |---|---|
-| 1024, 512 | frame 12 — the most torn still legible |
+| 1024, 512 | frame 11 — the most torn that still reads |
 | 256, 128 | frame 10 — calmer |
 | 64, 32 | live type, two or three tears |
 | 16 | live type, one tear, no displacement |

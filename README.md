@@ -16,17 +16,55 @@ input, or to a MIDI controller — and turns each hit into a **trigger**. Each
 trigger fires an **effect rule**, and each rule rewrites a span of compressed
 video frames. Then it renders.
 
-### The seven effects
+### The fifteen effects
+
+Grouped by what they do to the frame array, which is also how they are coloured.
+
+**Strips** — destroy reference frames
 
 | Effect | What happens to the bitstream |
 |---|---|
 | **Bloom** | Deletes the keyframes in range, so incoming motion vectors land on whatever pixels were already on screen. The classic transition smear. |
-| **Glide** | Holds one delta frame and re-applies it for the whole range — the picture keeps sliding in a fixed direction. |
-| **Echo** | Cycles a short window of delta frames, giving a rhythmic churn. |
-| **Stutter** | Holds each frame for several slots, dropping the ones between. |
+| **Void** | Kills every frame carrying more data than a threshold: keyframes first, then the heavy refresh frames a codec spends when too much changes at once. |
+
+**Holds** — repeat what is already there
+
+| Effect | What happens to the bitstream |
+|---|---|
+| **Glide** | Holds one delta frame and re-applies it for the whole range — the picture keeps sliding in one direction. |
+| **Echo** | Loops the first few delta frames, so the image churns in a cycle rather than drifting. |
+| **Stutter** | Keeps one frame in every few and skips the rest: a hard judder that holds still between updates. |
+| **Freeze** | A true still. No motion applied at all. |
+| **Overlap** | Takes a run, steps back less than its length, takes another — each run replays part of the one before it. |
+
+**Reorders** — change which frames are used, and in what order
+
+| Effect | What happens to the bitstream |
+|---|---|
 | **Reverse** | Plays the range's motion backwards. |
-| **Shuffle** | Randomly permutes the delta frames in range. |
-| **Freeze** | A true still: no motion applied at all. |
+| **Invert** | Swaps each frame with its neighbour, so motion advances then corrects, one frame out of step. |
+| **Weave** | Interleaves the range with itself reversed — two contradictory directions on alternate frames. |
+| **Jiggle** | Displaces each frame in time by a gaussian amount. Motion stumbles rather than tears. |
+| **Sort** | Reorders by frame size, which tracks how much changed — so it plays the range from quiet to violent, or the reverse. |
+| **Rise** | Skips forward through the range, then holds on the last frame reached. |
+| **Shuffle** | Permutes the delta frames individually. |
+| **Blocks** | Shuffles in blocks, so motion stays coherent inside each and only the joins are wrong. |
+
+The frame-level modes come from
+[Datamosher Pro](https://github.com/Akascape/Datamosher-Pro) and the Tomato
+automosher it builds on. Its other half — Sink, Shear, Zoom, Slice, Stop,
+Fluid, Motion Transfer and the rest — rewrites the motion vectors *inside*
+frames rather than reordering whole ones, which needs
+[FFglitch](https://ffglitch.org) as a separate binary. Those are not
+implemented here.
+
+### Where each effect is live
+
+Each effect gets its own lane on the timeline. A lane with nothing painted on
+it is live for the whole clip, which means every effect fires on every trigger.
+Drag across a lane to paint a span and that effect only fires on triggers
+inside it, so a set of effects takes turns over a clip. Double-click a span to
+remove it.
 
 ---
 
@@ -204,6 +242,8 @@ beyglactl render clip.mp4 out.mp4 \
     --audio track.wav --effect glide       # cut the clip to a separate track
 beyglactl render clip.mp4 out.mp4 \
     --at 1.5,3.0,4.5 --effect stutter      # place triggers by hand
+beyglactl render clip.mp4 out.mp4 \
+    --effect jiggle --live 2.0-4.0         # only fire inside a span
 beyglactl render clip.mp4 out.mp4 \
     --cancel-after 2                       # debug: prove cancelling kills ffmpeg
 ```

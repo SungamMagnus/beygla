@@ -186,7 +186,7 @@ struct ContentView: View {
                 LabelValue(label: "Took", value: String(format: "%.1fs", r.duration),
                            color: Sungam.ink62, size: Sungam.textSm)
             } else {
-                Text("Click the timeline to scrub. Double-click to place a trigger there — a hand-placed trigger fires every enabled effect.")
+                Text("Click the waveform to scrub, double-click to place a trigger. Drag across a lane below to set where that effect is live.")
                     .font(Sungam.mono(Sungam.textSm))
                     .foregroundStyle(Sungam.ink38)
             }

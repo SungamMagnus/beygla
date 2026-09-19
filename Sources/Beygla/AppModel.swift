@@ -248,6 +248,28 @@ public final class AppModel: ObservableObject {
 
     public func clearTriggers() { events.removeAll() }
 
+    // MARK: - Where each effect is live
+
+    /// Paint a span on a rule's lane. Until a rule has one, it is live
+    /// everywhere; the first region painted is what starts restricting it.
+    public func addRegion(to ruleID: UUID, from: Double, to: Double) {
+        guard let i = rules.firstIndex(where: { $0.id == ruleID }) else { return }
+        guard abs(to - from) > 0.02 else { return }
+        rules[i].activeRegions.append(ActiveRegion(start: from, end: to))
+        rules[i].activeRegions.sort { $0.start < $1.start }
+    }
+
+    public func removeRegion(from ruleID: UUID, at time: Double) {
+        guard let i = rules.firstIndex(where: { $0.id == ruleID }) else { return }
+        rules[i].activeRegions.removeAll { $0.contains(time) }
+    }
+
+    /// Back to live everywhere.
+    public func clearRegions(for ruleID: UUID) {
+        guard let i = rules.firstIndex(where: { $0.id == ruleID }) else { return }
+        rules[i].activeRegions.removeAll()
+    }
+
     // MARK: - Transport
 
     public func togglePlay() {

@@ -41,6 +41,7 @@ func usage() -> Never {
           --audio track.wav          use this audio instead of the video's own
           --at 1.0,2.5,4.0           place triggers by hand at these seconds
                                      instead of detecting them
+          --live 2.0-4.0,6.0-7.0     only let the effect fire inside these spans
           --purge                    strip every keyframe in the clip
           --cancel-after 1.5         debug: cancel mid-render, to check that
                                      cancelling actually kills ffmpeg
@@ -147,8 +148,22 @@ do {
                              band: onsetSettings.band)
             }
         }
+        // Spans where the effect is live — the command-line form of painting a
+        // lane on the timeline. Without any, it is live for the whole clip.
+        let regions: [ActiveRegion] = (option("live")?.split(separator: ",") ?? [])
+            .compactMap { spec in
+                let p = spec.split(separator: "-")
+                guard p.count == 2, let a = Double(p[0]), let b = Double(p[1]) else { return nil }
+                return ActiveRegion(start: a, end: b)
+            }
+        if !regions.isEmpty {
+            print("live only inside " + regions
+                .map { String(format: "%.2f-%.2fs", $0.start, $0.end) }
+                .joined(separator: ", "))
+        }
+
         let rules = [MoshRule(kind: kind, source: .audio, band: onsetSettings.band,
-                              duration: duration)]
+                              duration: duration, activeRegions: regions)]
 
         var request = RenderRequest(input: input, output: output, events: events, rules: rules)
         request.audioSource = audioOverride

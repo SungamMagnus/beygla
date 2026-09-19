@@ -40,6 +40,25 @@ public struct TriggerEvent: Identifiable, Codable, Hashable, Sendable {
     }
 }
 
+/// A span of the timeline where one effect is live.
+///
+/// A rule with no regions is active everywhere. Paint one or more and the rule
+/// only fires on triggers that land inside them — which is how a set of effects
+/// takes turns over a clip instead of all of them firing on every hit.
+public struct ActiveRegion: Codable, Hashable, Identifiable, Sendable {
+    public var id: UUID
+    public var start: Double
+    public var end: Double
+
+    public init(id: UUID = UUID(), start: Double, end: Double) {
+        self.id = id
+        self.start = min(start, end)
+        self.end = max(start, end)
+    }
+
+    public func contains(_ t: Double) -> Bool { t >= start && t <= end }
+}
+
 /// Turns trigger events into mosh ops. A rule is the bridge between "the kick
 /// hit" and "smear 8 frames of video".
 public struct MoshRule: Identifiable, Codable, Hashable, Sendable {
@@ -66,12 +85,15 @@ public struct MoshRule: Identifiable, Codable, Hashable, Sendable {
     /// Nudge the effect earlier or later, in seconds. Useful to compensate for
     /// the fact that a smear reads a frame or two after the hit.
     public var offset: Double
+    /// Spans of the timeline where this effect is live. Empty means everywhere.
+    public var activeRegions: [ActiveRegion]
 
     public init(id: UUID = UUID(), enabled: Bool = true, kind: MoshOpKind,
                 source: TriggerSource, note: Int? = nil, band: OnsetBand? = nil,
                 duration: Double = 0.25, durationJitter: Double = 0,
                 amountFloor: Double = 0.4, strengthInfluence: Double = 0.6,
-                probability: Double = 1.0, offset: Double = 0) {
+                probability: Double = 1.0, offset: Double = 0,
+                activeRegions: [ActiveRegion] = []) {
         self.id = id
         self.enabled = enabled
         self.kind = kind
@@ -84,10 +106,20 @@ public struct MoshRule: Identifiable, Codable, Hashable, Sendable {
         self.strengthInfluence = strengthInfluence
         self.probability = probability
         self.offset = offset
+        self.activeRegions = activeRegions
+    }
+
+    /// Whether the effect is live at this point on the timeline.
+    public func isActive(at time: Double) -> Bool {
+        activeRegions.isEmpty || activeRegions.contains { $0.contains(time) }
     }
 
     public func matches(_ event: TriggerEvent) -> Bool {
         guard enabled else { return false }
+        // Painted regions gate every source, a hand-placed trigger included: if
+        // you drew where an effect is live, a trigger outside it should not
+        // wake it up.
+        guard isActive(at: event.time) else { return false }
         // A hand-placed trigger is an explicit instruction — do this, here — so
         // it fires every enabled effect regardless of what that effect is
         // otherwise listening to. Filtering it by source would mean a trigger

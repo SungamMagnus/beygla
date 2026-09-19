@@ -61,19 +61,28 @@ extension MoshOpKind {
     var signalColor: Color {
         switch self {
         // Destroys reference frames: the primary transform.
-        case .bloom: return Sungam.coral
+        case .bloom, .void: return Sungam.coral
         // Repeats or holds what is already there.
-        case .glide, .echo, .stutter, .freeze: return Sungam.teal
-        // Reorders what is already there.
-        case .reverse, .shuffle: return Sungam.steel
+        case .glide, .echo, .stutter, .freeze, .overlap: return Sungam.teal
+        // Changes which frames are used, and in what order.
+        case .reverse, .shuffle, .invert, .weave, .jiggle, .sort, .rise, .blockShuffle:
+            return Sungam.steel
         }
+    }
+
+    /// Grouped by family so the palette reads as three colours, not fifteen.
+    static var byFamily: [MoshOpKind] {
+        [.bloom, .void,
+         .glide, .echo, .stutter, .freeze, .overlap,
+         .reverse, .invert, .weave, .jiggle, .sort, .rise, .shuffle, .blockShuffle]
     }
 
     var family: String {
         switch self {
-        case .bloom: return "strips"
-        case .glide, .echo, .stutter, .freeze: return "holds"
-        case .reverse, .shuffle: return "reorders"
+        case .bloom, .void: return "strips"
+        case .glide, .echo, .stutter, .freeze, .overlap: return "holds"
+        case .reverse, .shuffle, .invert, .weave, .jiggle, .sort, .rise, .blockShuffle:
+            return "reorders"
         }
     }
 }
