@@ -379,6 +379,62 @@ struct SegmentMeter: View {
     }
 }
 
+// MARK: - Fader
+
+/// A flat track with a small handle — the system's linear control, next to
+/// the Knob's rotary one. The tokens describe it vertical (`--fader-travel`
+/// is a throw in px, sized for a mixer-style channel strip); this is the
+/// horizontal adaptation, which suits a control paired with a horizontal
+/// timeline better than a rotary one would. The handle is one of exactly two
+/// places in the whole system that gets a rounded corner — the other is the
+/// track itself — everything else on the panel stays square.
+struct Fader: View {
+    @Binding var value: Double
+    var range: ClosedRange<Double> = 0 ... 1
+    var color: Color = Sungam.coral
+    var width: CGFloat = 130
+
+    @State private var dragStartValue: Double?
+
+    private var norm: Double {
+        let span = range.upperBound - range.lowerBound
+        guard span > 0 else { return 0 }
+        return min(max((value - range.lowerBound) / span, 0), 1)
+    }
+
+    var body: some View {
+        let trackH: CGFloat = 6 * Sungam.scale
+        let handleW: CGFloat = 14 * Sungam.scale
+        let handleH: CGFloat = 16 * Sungam.scale
+        let w = width * Sungam.scale
+
+        ZStack(alignment: .leading) {
+            Capsule()
+                .fill(Sungam.ink13)
+                .frame(width: w, height: trackH)
+            Capsule()
+                .fill(color.opacity(0.55))
+                .frame(width: max(handleW / 2, w * norm), height: trackH)
+            RoundedRectangle(cornerRadius: 3)
+                .fill(Sungam.paper)
+                .overlay(RoundedRectangle(cornerRadius: 3).stroke(color, lineWidth: Sungam.borderDefault))
+                .frame(width: handleW, height: handleH)
+                .offset(x: min(max(0, w * norm - handleW / 2), w - handleW))
+        }
+        .frame(width: w, height: handleH)
+        .contentShape(Rectangle())
+        .gesture(
+            DragGesture(minimumDistance: 0)
+                .onChanged { g in
+                    if dragStartValue == nil { dragStartValue = value }
+                    let frac = min(max(0, Double(g.location.x) / Double(w)), 1)
+                    value = range.lowerBound + frac * (range.upperBound - range.lowerBound)
+                }
+                .onEnded { _ in dragStartValue = nil }
+        )
+    }
+}
+
 // MARK: - Label / value pair
 
 /// The panel's readout: a tracked label in secondary ink with its value in the

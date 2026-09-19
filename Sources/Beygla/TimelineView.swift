@@ -84,57 +84,74 @@ struct TimelineView: View {
         GeometryReader { geo in
             let w = Double(geo.size.width)
 
-            Canvas { ctx, size in
-                drawGrid(ctx, size: size)
-                drawWaveform(ctx, size: size)
-                drawFlux(ctx, size: size)
-                drawLanes(ctx, size: size)
-                drawTriggers(ctx, size: size)
-                drawPlayhead(ctx, size: size)
-            }
-            .contentShape(Rectangle())
-            .onTapGesture(count: 2) { p in
-                let t = time(at: p.x, width: w)
-                if p.y < laneY {
-                    model.addManualTrigger(at: t)
-                } else if let rule = lane(at: p.y) {
-                    // Double-click inside a span removes it.
-                    switch rule {
-                    case .bitstream(let r): model.removeRegion(from: r.id, at: t)
-                    case .vector(let r): model.removeVectorRegion(from: r.id, at: t)
+            TrackpadGestureCapture(
+                onMagnify: { factor, xFraction in
+                    // Anchor the zoom on where the pinch is centred, in the
+                    // window as it stood *before* this event, so the point
+                    // under the cursor is the point that stays under it.
+                    let anchor = time(at: xFraction * geo.size.width, width: w)
+                    model.setTimelineZoom(model.timelineZoom * factor, anchoredAt: anchor)
+                },
+                onPanX: { deltaX in
+                    guard model.timelineZoom > 1 else { return }
+                    let secondsPerPoint = visibleDuration / max(w, 1)
+                    // Two fingers moving left uncovers content further along
+                    // in time — the window should advance to meet them.
+                    model.panTimeline(bySeconds: deltaX * secondsPerPoint)
+                }
+            ) {
+                Canvas { ctx, size in
+                    drawGrid(ctx, size: size)
+                    drawWaveform(ctx, size: size)
+                    drawFlux(ctx, size: size)
+                    drawLanes(ctx, size: size)
+                    drawTriggers(ctx, size: size)
+                    drawPlayhead(ctx, size: size)
+                }
+                .contentShape(Rectangle())
+                .onTapGesture(count: 2) { p in
+                    let t = time(at: p.x, width: w)
+                    if p.y < laneY {
+                        model.addManualTrigger(at: t)
+                    } else if let rule = lane(at: p.y) {
+                        // Double-click inside a span removes it.
+                        switch rule {
+                        case .bitstream(let r): model.removeRegion(from: r.id, at: t)
+                        case .vector(let r): model.removeVectorRegion(from: r.id, at: t)
+                        }
                     }
                 }
-            }
-            .onTapGesture(count: 1) { p in
-                if p.y < laneY { model.seek(to: time(at: p.x, width: w)) }
-            }
-            // A click is a zero-distance drag, so a drag that accepts one would
-            // swallow every tap before either tap gesture saw it.
-            .simultaneousGesture(
-                DragGesture(minimumDistance: 3)
-                    .onChanged { g in
-                        if let p = paint {
-                            paint = (p.ruleID, p.kind, p.from, time(at: g.location.x, width: w))
-                        } else if g.startLocation.y < laneY {
-                            model.seek(to: time(at: g.location.x, width: w))
-                        } else if let rule = lane(at: g.startLocation.y) {
-                            let kind: PaintKind = { if case .vector = rule { return .vector }; return .bitstream }()
-                            paint = (rule.id, kind,
-                                     time(at: g.startLocation.x, width: w),
-                                     time(at: g.location.x, width: w))
-                        }
-                    }
-                    .onEnded { _ in
-                        if let p = paint {
-                            switch p.kind {
-                            case .bitstream: model.addRegion(to: p.ruleID, from: p.from, to: p.to)
-                            case .vector: model.addVectorRegion(to: p.ruleID, from: p.from, to: p.to)
+                .onTapGesture(count: 1) { p in
+                    if p.y < laneY { model.seek(to: time(at: p.x, width: w)) }
+                }
+                // A click is a zero-distance drag, so a drag that accepts one
+                // would swallow every tap before either tap gesture saw it.
+                .simultaneousGesture(
+                    DragGesture(minimumDistance: 3)
+                        .onChanged { g in
+                            if let p = paint {
+                                paint = (p.ruleID, p.kind, p.from, time(at: g.location.x, width: w))
+                            } else if g.startLocation.y < laneY {
+                                model.seek(to: time(at: g.location.x, width: w))
+                            } else if let rule = lane(at: g.startLocation.y) {
+                                let kind: PaintKind = { if case .vector = rule { return .vector }; return .bitstream }()
+                                paint = (rule.id, kind,
+                                         time(at: g.startLocation.x, width: w),
+                                         time(at: g.location.x, width: w))
                             }
                         }
-                        paint = nil
-                    }
-            )
-            .overlay(alignment: .topLeading) { status }
+                        .onEnded { _ in
+                            if let p = paint {
+                                switch p.kind {
+                                case .bitstream: model.addRegion(to: p.ruleID, from: p.from, to: p.to)
+                                case .vector: model.addVectorRegion(to: p.ruleID, from: p.from, to: p.to)
+                                }
+                            }
+                            paint = nil
+                        }
+                )
+                .overlay(alignment: .topLeading) { status }
+            }
         }
         .frame(height: height)
         .overlay(Rectangle().stroke(Sungam.ink28, lineWidth: Sungam.hairline))
@@ -162,12 +179,24 @@ struct TimelineView: View {
 
     // MARK: Geometry
 
+    // Zoom narrows which slice of the clip `x`/`time(at:)` map against.
+    // `duration` (the whole clip) still bounds what a value clamps to, but
+    // every pixel-to-time conversion below goes through the visible window
+    // — `timelineOffset ..< timelineOffset + visibleDuration` — instead.
+    private var visibleStart: Double { model.timelineOffset }
+    private var visibleDuration: Double { model.timelineVisibleDuration }
+
+    // Deliberately unclamped: Canvas already clips its drawing to its own
+    // bounds, so a sample outside the visible window maps to a pixel outside
+    // [0, width] and is simply not rendered, rather than being dragged to
+    // the edge and drawn there as a false mark.
     private func x(_ t: Double, _ width: Double) -> Double {
-        width * min(max(0, t / duration), 1)
+        width * (t - visibleStart) / visibleDuration
     }
 
     private func time(at x: CGFloat, width: Double) -> Double {
-        min(max(0, Double(x) / max(width, 1) * duration), duration)
+        let t = visibleStart + Double(x) / max(width, 1) * visibleDuration
+        return min(max(0, t), duration)
     }
 
     private func lane(at y: CGFloat) -> LaneRule? {
@@ -204,15 +233,22 @@ struct TimelineView: View {
         let env = model.envelope
         guard !env.isEmpty else { return }
         let mid = waveH / 2
+        // Samples are spread uniformly across the whole clip; only the ones
+        // whose time falls in the visible window are worth iterating.
+        let perSample = duration / Double(env.count)
+        let lo = max(0, Int(visibleStart / perSample) - 1)
+        let hi = min(env.count, Int((visibleStart + visibleDuration) / perSample) + 2)
+        guard lo < hi else { return }
+
+        let lineWidth = max(1, size.width / Double(hi - lo))
         var path = Path()
-        let step = size.width / Double(env.count)
-        for (i, v) in env.enumerated() {
-            let px = Double(i) * step
-            let half = Double(v) * (waveH / 2) * 0.95
+        for i in lo ..< hi {
+            let px = x(Double(i) * perSample, size.width)
+            let half = Double(env[i]) * (waveH / 2) * 0.95
             path.move(to: CGPoint(x: px, y: mid - half))
             path.addLine(to: CGPoint(x: px, y: mid + half))
         }
-        ctx.stroke(path, with: .color(Sungam.ink45), lineWidth: max(1, step))
+        ctx.stroke(path, with: .color(Sungam.ink45), lineWidth: lineWidth)
     }
 
     /// The detection curve the threshold acts on — drawn so the sensitivity
@@ -220,11 +256,17 @@ struct TimelineView: View {
     private func drawFlux(_ ctx: GraphicsContext, size: CGSize) {
         let flux = model.fluxCurve
         guard flux.count > 1 else { return }
+        let perSample = duration / Double(flux.count - 1)
+        let lo = max(0, Int(visibleStart / perSample) - 1)
+        let hi = min(flux.count, Int((visibleStart + visibleDuration) / perSample) + 2)
+        guard lo < hi else { return }
+
         var path = Path()
-        let step = size.width / Double(flux.count - 1)
-        for (i, v) in flux.enumerated() {
-            let p = CGPoint(x: Double(i) * step, y: waveH - Double(v) * waveH * 0.9)
-            if i == 0 { path.move(to: p) } else { path.addLine(to: p) }
+        var started = false
+        for i in lo ..< hi {
+            let p = CGPoint(x: x(Double(i) * perSample, size.width),
+                            y: waveH - Double(flux[i]) * waveH * 0.9)
+            if !started { path.move(to: p); started = true } else { path.addLine(to: p) }
         }
         ctx.stroke(path, with: .color(Sungam.coral.opacity(0.7)), lineWidth: Sungam.hairline)
     }

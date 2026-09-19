@@ -279,6 +279,21 @@ blocks for as long as it takes. On a 90-second 1080p clip whose full render
 takes 32 seconds, cancelling returns in under two, leaves no stray process and
 removes the partial file.
 
+### Zooming the timeline
+
+A long file needs more than the whole-clip view to edit precisely. The **Zoom**
+slider above the timeline narrows the visible window; **Reset** snaps back to
+the whole clip. Zoom is felt exponentially — the turn from 1× to 2× and the
+turn from 100× to 200× cover the same amount of slider travel — since a linear
+mapping would spend most of the slider's length on zoom levels nobody uses.
+
+On a trackpad, **pinch to zoom** — the window narrows around wherever your
+fingers are, so the moment you are looking at stays under them rather than the
+view recentring on the whole clip — and **swipe with two fingers to pan**
+once zoomed in. Every gesture that already worked — click to scrub, drag to
+paint a span, double-click to place a trigger or clear a span — keeps working
+exactly as before; zoom only changes which slice of time those pixels map to.
+
 ### Live — perform the mosh
 
 1. Set the trigger source to **Audio in** or **MIDI in**.
@@ -348,6 +363,7 @@ Sources/MoshCore/          # no UI, no AppKit — all of it testable from beygla
   RenderPipeline.swift     #   the stages, with progress and cancellation
 Sources/Beygla/            # SwiftUI app
   SungamKit.swift          #   the design system, ported to SwiftUI
+  TrackpadGestureCapture.swift  # pinch/two-finger-pan, wrapped around the timeline
 Sources/beyglactl/           # command line front end
 ```
 

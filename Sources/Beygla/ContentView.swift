@@ -123,11 +123,55 @@ struct ContentView: View {
             .overlay(Rectangle().stroke(Sungam.ink28, lineWidth: Sungam.hairline))
 
             transport
+            timelineZoomRow
             TimelineView()
             readout
         }
         .padding(16)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    /// Zoom is felt exponentially — the jump from 1x to 2x and the jump from
+    /// 100x to 200x should feel like the same amount of turn on the slider —
+    /// so the Fader's linear 0...1 travel is mapped through a log curve
+    /// rather than straight onto the zoom value.
+    private var zoomFraction: Binding<Double> {
+        Binding(
+            get: {
+                let z = max(1, model.timelineZoom)
+                return log(z) / log(AppModel.maxTimelineZoom)
+            },
+            set: { frac in
+                let z = exp(max(0, min(1, frac)) * log(AppModel.maxTimelineZoom))
+                model.setTimelineZoom(z, anchoredAt: model.currentTime)
+            }
+        )
+    }
+
+    private var timelineZoomRow: some View {
+        HStack(spacing: 10) {
+            Text("ZOOM")
+                .font(Sungam.mono(Sungam.text2xs))
+                .tracking(Sungam.text2xs * Sungam.scale * 0.08)
+                .foregroundStyle(Sungam.ink45)
+
+            Fader(value: zoomFraction, color: Sungam.steel, width: 130)
+
+            Text(model.timelineZoom < 1.05 ? "1X" : String(format: "%.1fX", model.timelineZoom))
+                .font(Sungam.mono(Sungam.text2xs).monospacedDigit())
+                .foregroundStyle(Sungam.ink62)
+                .frame(width: 36 * Sungam.scale, alignment: .leading)
+
+            LatchButton(label: "Reset", enabled: model.timelineZoom > 1.001) {
+                model.resetTimelineZoom()
+            }
+
+            Spacer()
+
+            Text("Pinch to zoom, two fingers to pan")
+                .font(Sungam.mono(Sungam.text2xs))
+                .foregroundStyle(Sungam.ink38)
+        }
     }
 
     private var transport: some View {

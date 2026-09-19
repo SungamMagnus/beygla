@@ -68,6 +68,56 @@ public final class AppModel: ObservableObject {
     @Published public var currentTime: Double = 0
     @Published public var isPlaying = false
 
+    // MARK: Timeline zoom
+    //
+    // 1 shows the whole clip; higher values narrow the visible window so a
+    // long file can be edited in detail. `timelineOffset` is the start of
+    // that window, in seconds — the two together define exactly what the
+    // timeline currently shows, and both the zoom slider and trackpad
+    // pinch/pan gestures drive the same pair of numbers.
+    public static let maxTimelineZoom: Double = 200
+
+    @Published public var timelineZoom: Double = 1 {
+        didSet { clampTimelineOffset() }
+    }
+    @Published public var timelineOffset: Double = 0 {
+        didSet { clampTimelineOffset() }
+    }
+
+    public var timelineVisibleDuration: Double {
+        max(0.05, (info?.duration ?? 0.001) / max(1, timelineZoom))
+    }
+
+    public func resetTimelineZoom() {
+        timelineZoom = 1
+        timelineOffset = 0
+    }
+
+    /// Zoom around a fixed point in time — the point under the cursor for a
+    /// trackpad pinch, or the playhead for the slider — so the moment being
+    /// looked at stays under the cursor instead of the window recentering on
+    /// zero every time.
+    public func setTimelineZoom(_ newZoom: Double, anchoredAt anchorTime: Double) {
+        let clamped = min(max(1, newZoom), Self.maxTimelineZoom)
+        let oldVisible = timelineVisibleDuration
+        let fraction = oldVisible > 0 ? (anchorTime - timelineOffset) / oldVisible : 0
+        timelineZoom = clamped
+        let newVisible = timelineVisibleDuration
+        timelineOffset = anchorTime - fraction * newVisible
+    }
+
+    public func panTimeline(bySeconds delta: Double) {
+        timelineOffset += delta
+    }
+
+    private func clampTimelineOffset() {
+        let total = info?.duration ?? 0
+        let visible = timelineVisibleDuration
+        let maxOffset = max(0, total - visible)
+        if timelineOffset < 0 { timelineOffset = 0 }
+        if timelineOffset > maxOffset { timelineOffset = maxOffset }
+    }
+
     // MARK: Render
 
     @Published public var isRendering = false
@@ -155,6 +205,7 @@ public final class AppModel: ObservableObject {
             return
         }
 
+        resetTimelineZoom()
         showPlayback(.source, preserveTime: false)
         Task { await analyseTrack() }
     }
