@@ -83,24 +83,79 @@ public final class ProcessToken: @unchecked Sendable {
 public final class FFmpegTool: @unchecked Sendable {
     public let ffmpeg: URL
     public let ffprobe: URL
+    /// What this particular binary can do. A bundled LGPL build has no libx264,
+    /// so the deliverable is encoded with VideoToolbox instead; a Homebrew
+    /// build usually has both. Probed once, because the answer decides every
+    /// render command afterwards.
+    public let capabilities: Capabilities
+
+    public struct Capabilities: Sendable {
+        public var hasLibX264: Bool
+        public var hasVideoToolbox: Bool
+        public var isBundled: Bool
+        public var version: String
+
+        /// The encoder used for the final file.
+        public var videoEncoder: String {
+            hasLibX264 ? "libx264" : (hasVideoToolbox ? "h264_videotoolbox" : "mpeg4")
+        }
+
+        public var summary: String {
+            "\(isBundled ? "bundled" : "system") ffmpeg \(version) · \(videoEncoder)"
+        }
+    }
 
     public static let searchPaths = [
         "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/opt/local/bin",
     ]
 
-    public init(ffmpeg: URL, ffprobe: URL) {
+    public init(ffmpeg: URL, ffprobe: URL, isBundled: Bool = false) {
         self.ffmpeg = ffmpeg
         self.ffprobe = ffprobe
+
+        let encoders = (try? FFmpegTool.capture(ffmpeg, ["-hide_banner", "-encoders"])) ?? ""
+        let banner = (try? FFmpegTool.capture(ffmpeg, ["-version"])) ?? ""
+        let version = banner
+            .split(separator: "\n").first
+            .flatMap { $0.split(separator: " ").dropFirst(2).first.map(String.init) } ?? "?"
+
+        capabilities = Capabilities(
+            hasLibX264: encoders.contains("libx264"),
+            hasVideoToolbox: encoders.contains("h264_videotoolbox"),
+            isBundled: isBundled,
+            version: version)
+    }
+
+    /// Run a tool and return stdout, ignoring a non-zero exit.
+    static func capture(_ tool: URL, _ args: [String]) throws -> String {
+        let p = Process()
+        p.executableURL = tool
+        p.arguments = args
+        let out = Pipe()
+        p.standardOutput = out
+        p.standardError = FileHandle.nullDevice
+        try p.run()
+        let d = out.fileHandleForReading.readDataToEndOfFile()
+        p.waitUntilExit()
+        return String(decoding: d, as: UTF8.self)
     }
 
     /// Look for the binaries next to the app first (a bundled copy), then in the
     /// usual places, then on PATH.
     public static func locate(bundledIn resourceDir: URL? = nil) -> FFmpegTool? {
-        func find(_ name: String) -> URL? {
-            if let dir = resourceDir {
-                let u = dir.appendingPathComponent(name)
-                if FileManager.default.isExecutableFile(atPath: u.path) { return u }
+        // A bundled copy wins. It is the one that is guaranteed to be there and
+        // to behave the same on every machine, which matters more for a render
+        // than the marginal quality of one encoder over another.
+        if let dir = resourceDir {
+            let a = dir.appendingPathComponent("ffmpeg")
+            let b = dir.appendingPathComponent("ffprobe")
+            if FileManager.default.isExecutableFile(atPath: a.path),
+               FileManager.default.isExecutableFile(atPath: b.path) {
+                return FFmpegTool(ffmpeg: a, ffprobe: b, isBundled: true)
             }
+        }
+
+        func find(_ name: String) -> URL? {
             for p in searchPaths {
                 let u = URL(fileURLWithPath: p).appendingPathComponent(name)
                 if FileManager.default.isExecutableFile(atPath: u.path) { return u }
@@ -114,7 +169,7 @@ public final class FFmpegTool: @unchecked Sendable {
             return nil
         }
         guard let a = find("ffmpeg"), let b = find("ffprobe") else { return nil }
-        return FFmpegTool(ffmpeg: a, ffprobe: b)
+        return FFmpegTool(ffmpeg: a, ffprobe: b, isBundled: false)
     }
 
     // MARK: - Probe
@@ -238,15 +293,22 @@ public final class FFmpegTool: @unchecked Sendable {
         args += ["-map", "0:v:0"]
         if audioFrom != nil { args += ["-map", "1:a:0?"] }
 
-        args += [
-            "-fps_mode", "cfr",
-            "-r", String(frameRate),
-            "-c:v", "libx264",
-            "-preset", "medium",
-            "-crf", String(crf),
-            "-pix_fmt", "yuv420p",
-            "-movflags", "+faststart",
-        ]
+        args += ["-fps_mode", "cfr", "-r", String(frameRate)]
+
+        if capabilities.hasLibX264 {
+            args += ["-c:v", "libx264", "-preset", "medium", "-crf", String(crf)]
+        } else if capabilities.hasVideoToolbox {
+            // VideoToolbox has no CRF. Its -q:v runs the other way — 1 is worst,
+            // 100 is best — so the scale is inverted to keep one quality
+            // argument meaning the same thing throughout the app.
+            let q = max(20, min(95, 100 - crf * 2))
+            args += ["-c:v", "h264_videotoolbox", "-q:v", String(q),
+                     "-allow_sw", "1", "-realtime", "0"]
+        } else {
+            args += ["-c:v", "mpeg4", "-q:v", "3"]
+        }
+
+        args += ["-pix_fmt", "yuv420p", "-movflags", "+faststart"]
         if audioFrom != nil { args += ["-c:a", "aac", "-b:a", "192k", "-shortest"] }
         args.append(output.path)
 

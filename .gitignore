@@ -6,3 +6,4 @@ build/
 *.mp4
 dist/
 icon/work/
+vendor/

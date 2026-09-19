@@ -45,8 +45,8 @@
       <a class="latch ghost" href="https://github.com/SungamMagnus/beygla">Read the source</a>
     </div>
     <p class="meta">
-      Version 0.2.0 &nbsp;·&nbsp; Universal, Apple Silicon and Intel &nbsp;·&nbsp;
-      macOS 14 or later &nbsp;·&nbsp; requires ffmpeg
+      Version 0.3.0 &nbsp;·&nbsp; Universal, Apple Silicon and Intel &nbsp;·&nbsp;
+      macOS 14 or later &nbsp;·&nbsp; no dependencies
     </p>
   </section>
 
@@ -342,13 +342,15 @@
 
   <section class="panel">
     <span class="title">Install</span>
-    <p>ffmpeg is required and is not bundled:</p>
-    <pre>brew install ffmpeg</pre>
     <p>
-      Then download the release, unzip, and move <code>Beygla.app</code> to
-      Applications. The app is ad-hoc signed and not notarized, so Gatekeeper will
-      refuse it on first launch — right-click and choose <strong>Open</strong>, or
-      clear the quarantine flag:
+      Download the release, unzip, and move <code>Beygla.app</code> to
+      Applications. <strong>Nothing else to install</strong> — ffmpeg ships inside
+      the app.
+    </p>
+    <p>
+      The app is ad-hoc signed and not notarized, so Gatekeeper will refuse it on
+      first launch — right-click and choose <strong>Open</strong>, or clear the
+      quarantine flag:
     </p>
     <pre>xattr -dr com.apple.quarantine /Applications/Beygla.app</pre>
     <p>
@@ -356,7 +358,16 @@
       product. Building from source avoids the issue entirely.
     </p>
     <pre>git clone https://github.com/SungamMagnus/beygla.git
-cd beygla &amp;&amp; ./build.sh</pre>
+cd beygla
+./tools/build-ffmpeg.sh
+./build.sh --universal</pre>
+    <p>
+      The bundled ffmpeg is built from source rather than copied. Homebrew's is
+      dynamically linked against its own Cellar, built for one architecture, and
+      links libx264 — which makes it GPL. Beygla's is static, universal, and
+      built <code>--disable-gpl</code>, taking H.264 from VideoToolbox instead,
+      so it is LGPL. Everything the app never asks for is switched off.
+    </p>
     <p>
       The same build produces <code>beyglactl</code>, a command-line front end that
       shares every line of the actual moshing with the app.
@@ -399,7 +410,7 @@ cd beygla &amp;&amp; ./build.sh</pre>
 
 <footer>
   <div class="wrap line">
-    <span>Beygla 0.2.0</span>
+    <span>Beygla 0.3.0</span>
     <a href="https://github.com/SungamMagnus/beygla">github.com/SungamMagnus/beygla</a>
     <a href="https://github.com/SungamMagnus/sungam-design-system">Built with the Sungam design system</a>
     <span>Inspired by supermosh and Datamosher Pro</span>

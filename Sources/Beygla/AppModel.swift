@@ -79,6 +79,10 @@ public final class AppModel: ObservableObject {
     public let player = AVPlayer()
     public private(set) var tool: FFmpegTool?
     public var ffmpegMissing: Bool { tool == nil }
+    /// Which ffmpeg is doing the work and what it will encode with — worth
+    /// stating, because a bundled LGPL build has no libx264 and reaches for
+    /// VideoToolbox instead.
+    public var ffmpegSummary: String { tool?.capabilities.summary ?? "not found" }
 
     private var pcm: [Float] = []
     private var rawFlux: [Float] = []

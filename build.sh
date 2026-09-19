@@ -32,20 +32,24 @@ if [[ -f icon/Beygla.icns ]]; then
   cp icon/Beygla.icns "$APP/Contents/Resources/Beygla.icns"
 fi
 
-# Bundling ffmpeg here makes the app self-contained; without it Beygla falls
-# back to whatever is on PATH or in the usual Homebrew locations.
-if [[ -n "${BEYGLA_BUNDLE_FFMPEG:-}" ]]; then
-  for t in ffmpeg ffprobe; do
-    src="$(command -v "$t" || true)"
-    if [[ -n "$src" ]]; then
-      cp "$src" "$APP/Contents/Resources/$t"
-      echo "    bundled $t"
-    fi
-  done
+# A bundled ffmpeg makes the app self-contained. Build it with
+# ./tools/build-ffmpeg.sh — a static, universal, LGPL build with everything
+# Beygla never asks for switched off. Without it the app falls back to whatever
+# is on PATH or in the usual Homebrew locations.
+if [[ -x vendor/ffmpeg/ffmpeg && -x vendor/ffmpeg/ffprobe ]]; then
+  cp vendor/ffmpeg/ffmpeg vendor/ffmpeg/ffprobe "$APP/Contents/Resources/"
+  [[ -f vendor/ffmpeg/COPYING.LGPLv2.1 ]] && \
+    cp vendor/ffmpeg/COPYING.LGPLv2.1 "$APP/Contents/Resources/"
+  echo "    bundled ffmpeg $(cat vendor/ffmpeg/VERSION 2>/dev/null || echo '?') ($(lipo -archs vendor/ffmpeg/ffmpeg))"
+else
+  echo "    no bundled ffmpeg — run ./tools/build-ffmpeg.sh to make the app self-contained"
 fi
 
-# Ad-hoc signature. Enough for the microphone prompt on a locally built app;
-# replace with a Developer ID identity to distribute it.
+# Ad-hoc signature. Nested executables have to be signed before the bundle
+# that contains them, or the outer signature is invalid the moment it is made.
+for nested in "$APP/Contents/Resources/ffmpeg" "$APP/Contents/Resources/ffprobe"; do
+  [[ -f "$nested" ]] && codesign --force --sign - --timestamp=none "$nested" >/dev/null 2>&1
+done
 codesign --force --sign - --timestamp=none "$APP" >/dev/null 2>&1 || \
   echo "    (codesign skipped)"
 

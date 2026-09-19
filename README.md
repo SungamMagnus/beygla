@@ -157,24 +157,36 @@ so the tail of a hit doesn't re-arm it.
 
 ## Building
 
-Requires macOS 14+, Xcode command line tools, and ffmpeg:
+Requires macOS 14+ and the Xcode command line tools.
 
 ```bash
-brew install ffmpeg
+./tools/build-ffmpeg.sh   # once — builds the ffmpeg that ships inside the app
+./build.sh --universal
 ```
 
-Then:
+That produces `build/Beygla.app` and `build/beyglactl`. `build.sh` bundles
+`vendor/ffmpeg` into the app when it is there, so the result needs nothing
+installed. Skip the first step and the app falls back to whatever ffmpeg is on
+`PATH` or in the usual Homebrew locations — `brew install ffmpeg` if you would
+rather do it that way.
 
-```bash
-./build.sh
-```
+### Why ffmpeg is built rather than copied
 
-That produces `build/Beygla.app` and `build/beyglactl`. To make the app
-self-contained, bundle ffmpeg into it:
+Copying Homebrew's binary does not work, for three separate reasons. It is
+dynamically linked against dylibs inside its own Cellar, so on its own it will
+not run anywhere else. It is built for one architecture, and Beygla ships
+universal. And it links libx264, which makes it a GPL build — redistributing
+that inside an app drags GPL obligations along with it.
 
-```bash
-BEYGLA_BUNDLE_FFMPEG=1 ./build.sh
-```
+`tools/build-ffmpeg.sh` builds from source with `--disable-gpl` and gets H.264
+out of **VideoToolbox**, Apple's own encoder, already in the OS. The result is
+LGPL, which for a separate executable invoked as a subprocess means shipping
+the licence and an offer of source and nothing more. Everything Beygla never
+asks for is switched off, which is what keeps it small.
+
+Beygla adapts to whichever binary it finds: with libx264 it encodes the
+deliverable at a CRF, and without it uses `h264_videotoolbox` on an inverted
+quality scale. The Stream panel names the one in use.
 
 ---
 
@@ -325,9 +337,6 @@ they do to the frame array, and each family takes one hue:
 
 ## Known limits
 
-- **ffmpeg is an external dependency.** Found on `PATH` or in the usual Homebrew
-  locations unless bundled. The Homebrew build on this machine is x86_64, so it
-  runs under Rosetta; an arm64 build will encode noticeably faster.
 - **Live triggers are captured, not rendered live.** Arming records your
   performance against the playhead and the render happens after. Real-time
   moshed output is possible with the same engine — stream chunks to a decoder

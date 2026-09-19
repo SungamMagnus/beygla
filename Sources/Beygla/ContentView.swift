@@ -95,7 +95,7 @@ struct ContentView: View {
                     VStack(spacing: 10) {
                         Wordmark(text: "Drop a video", size: Sungam.textLg, color: Sungam.ink38)
                         if model.ffmpegMissing {
-                            Text("ffmpeg not found — brew install ffmpeg")
+                            Text("No ffmpeg. Build a bundled one with ./tools/build-ffmpeg.sh, or brew install ffmpeg")
                                 .font(Sungam.mono(Sungam.textBase))
                                 .foregroundStyle(Sungam.amber)
                         }

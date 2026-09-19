@@ -334,6 +334,12 @@ struct Inspector: View {
                     .foregroundStyle(Sungam.ink45)
                     .lineSpacing(3)
                     .fixedSize(horizontal: false, vertical: true)
+
+                Rectangle().fill(Sungam.ink13).frame(height: Sungam.hairline)
+
+                LabelValue(label: "Encoder", value: model.ffmpegSummary,
+                           color: model.ffmpegMissing ? Sungam.amber : Sungam.steel,
+                           size: Sungam.textSm)
             }
         }
     }
