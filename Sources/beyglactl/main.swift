@@ -49,6 +49,8 @@ func usage() -> Never {
           --grid-offset 0.25         where beat 1 falls, in seconds
           --in 2.5 --out 6.5         render only this part of the clip
           --mix 0.6                  how much mosh shows over the clean source
+          --smear 0.5                heal the picture this long after each effect
+                                     ends (default: never)
           --vector-effect KIND       add a vector effect (needs ffgac/ffedit)
                                      sink|stop|invertReverse|mirror|vibrate|
                                      zoom|slamZoom|shear|delay|shift|noise
@@ -154,6 +156,7 @@ do {
         let inPoint = option("in").flatMap { Double($0) }
         let outPoint = option("out").flatMap { Double($0) }
         let mix = option("mix").flatMap { Double($0) } ?? 1
+        let smear = option("smear").flatMap { Double($0) }
 
         // The detector listens to whatever will end up on the render.
         let manualTimes = option("at")?
@@ -223,6 +226,7 @@ do {
         request.quality = quality
         request.previewWidth = width
         request.mix = max(0, min(1, mix))
+        request.smear = smear.map { max(0, $0) }
         if inPoint != nil || outPoint != nil {
             let lo = max(0, inPoint ?? 0)
             let hi = try outPoint ?? tool.probe(input).duration

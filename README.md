@@ -355,6 +355,38 @@ the 100% render and the clean source to within about 1.5 grey levels, while
 differing from clean alone by about 30 — the mosh layer is held through the
 gaps, not replaced by the clean picture.
 
+### Smear
+
+**Smear** beside Mix sets how long an effect's damage lingers after the effect
+ends before the picture heals. A datamosh smear has no natural end: once an
+effect has corrupted the picture, every following delta frame keeps building
+on the corrupted pixels until a keyframe repaints them. Beygla puts keyframes
+only where it is told to, so until now a smear lasted until the content
+happened to repaint itself — a scene cut, a large movement — rather than for
+any time you chose. That also meant Bloom's Length knob did nothing: Bloom at
+0.1 s and at 1.0 s rendered byte-identical output.
+
+With Smear set, a clean keyframe is forced into the encode that long after
+every effect ends. The engine never strips a keyframe outside an effect's own
+range, so it survives and resets the picture; if a later effect covers it,
+that effect's smear carries on instead, as it should. At 0 the picture heals
+the moment an effect ends, and Bloom's Length becomes the smear length. The
+top of the fader is ∞, the old behaviour, and the default. On the timeline,
+each effect bar gets a faint tail showing how long its smear lasts.
+
+Verified: Bloom at 1, 3 and 5 s, 0.3 s long, Smear 0.5 s — the picture heals
+on frames 54, 114 and 174 exactly and is untouched before them. At Smear 0, a
+0.1 s Bloom heals at frame 93 and a 1.0 s Bloom at frame 120.
+
+Building this found that the vector pass had been throwing keyframes away. Its
+re-encode in `ffgac` was never told to skip scene-change detection, so it put a
+keyframe at every scene cut and dropped the ones forced at trigger times —
+Bloom behaved differently depending on whether a vector effect was in the
+same render. Both the trigger and heal keyframes are now forced in `ffgac` too.
+
+*Strip every keyframe* strips the heal points as well, so Smear has no effect
+while it is on; the Stream panel says so.
+
 ### Zooming the timeline
 
 A long file needs more than the whole-clip view to edit precisely. The **Zoom**
@@ -418,6 +450,8 @@ beyglactl render clip.mp4 out.mp4 \
     --bpm 128 --note eighth --effect stutter   # trigger on a tempo grid
 beyglactl render clip.mp4 out.mp4 \
     --in 12.0 --out 20.0 --mix 0.6         # a range, at 60% mix
+beyglactl render clip.mp4 out.mp4 \
+    --effect bloom --dur 0.4 --smear 0.2   # heal 0.2s after each bloom ends
 beyglactl list-vector-effects              # print all eleven, with their DMP source
 beyglactl render clip.mp4 out.mp4 \
     --cancel-after 2                       # debug: prove cancelling kills ffmpeg

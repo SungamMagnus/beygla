@@ -81,6 +81,18 @@ struct ContentView: View {
                     .foregroundStyle(model.mix < 0.999 ? Sungam.steel : Sungam.ink62)
                     .frame(width: 34 * Sungam.scale, alignment: .leading)
                     .onTapGesture(count: 2) { model.mix = 1 }
+                // Smear: how long an effect's damage lingers after it ends.
+                // The top of the fader is "never", the old behaviour.
+                Text("SMEAR")
+                    .font(Sungam.mono(Sungam.text2xs))
+                    .tracking(Sungam.text2xs * Sungam.scale * 0.08)
+                    .foregroundStyle(Sungam.ink45)
+                Fader(value: smearFraction, color: Sungam.steel, width: 90)
+                Text(model.smear.map { String(format: "%.1fs", $0) } ?? "∞")
+                    .font(Sungam.mono(Sungam.text2xs).monospacedDigit())
+                    .foregroundStyle(model.smear == nil ? Sungam.ink62 : Sungam.steel)
+                    .frame(width: 34 * Sungam.scale, alignment: .leading)
+                    .onTapGesture(count: 2) { model.smear = nil }
                 LatchButton(label: "Preview", enabled: canRender) { render(preview: true) }
                 LatchButton(label: "Render", color: Sungam.steel, filled: canRender,
                             enabled: canRender) { render(preview: false) }
@@ -158,6 +170,19 @@ struct ContentView: View {
                 model.setTimelineZoom(z, anchoredAt: model.timelinePlayheadTime)
             }
         )
+    }
+
+    /// Squared so the short end — where most of the useful settings are —
+    /// gets most of the travel. The last stretch of the fader is "never".
+    private var smearFraction: Binding<Double> {
+        Binding(
+            get: {
+                guard let s = model.smear else { return 1 }
+                return min(0.97, (s / AppModel.maxSmear).squareRoot())
+            },
+            set: { f in
+                model.smear = f >= 0.98 ? nil : AppModel.maxSmear * f * f
+            })
     }
 
     private var timelineZoomRow: some View {

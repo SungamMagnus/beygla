@@ -66,7 +66,8 @@ public final class FFglitchTool: @unchecked Sendable {
     ///
     /// `quality` follows FFmpeg's `-qscale:v` convention (lower is better).
     public func moshVectors(rawYUV: URL, width: Int, height: Int, frameRate: Double,
-                            script: String, quality: Int, token: ProcessToken? = nil,
+                            script: String, quality: Int, keyframeTimes: [Double] = [],
+                            token: ProcessToken? = nil,
                             output: URL) throws {
         let work = output.deletingLastPathComponent()
         let encoded = work.appendingPathComponent("vec-encoded-\(UUID().uuidString).m4v")
@@ -92,6 +93,13 @@ public final class FFglitchTool: @unchecked Sendable {
             "-mpv_flags", "+nopimb+forcemv",
             "-qscale:v", String(quality),
             "-g", "999999", "-bf", "0",
+            // Same rule as the main encode: keyframes only where Beygla asks
+            // for them. Without this ffgac put one at every scene cut.
+            "-sc_threshold", "1000000000",
+        ] + (keyframeTimes.isEmpty ? [] : [
+            "-force_key_frames",
+            keyframeTimes.map { String(format: "%.4f", $0) }.joined(separator: ","),
+        ]) + [
             "-vcodec", "mpeg4", "-f", "rawvideo",
             encoded.path,
         ], token: token)

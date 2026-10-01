@@ -313,10 +313,17 @@ struct TimelineView: View {
                 ctx.stroke(Path(r), with: .color(color), lineWidth: Sungam.borderDefault)
             }
 
-            // The frames this rule will actually rewrite.
+            // The frames this rule will actually rewrite, and — when Smear is
+            // set — a faint tail for how long the damage lingers after.
             for event in model.events where rule.matches(event) {
                 let x0 = x(event.time + rule.offset, size.width)
                 let x1 = x(event.time + rule.offset + rule.duration, size.width)
+                if let smear = model.smear, smear > 0 {
+                    let x2 = x(event.time + rule.offset + rule.duration + smear, size.width)
+                    ctx.fill(Path(CGRect(x: x1, y: rect.minY + 6,
+                                         width: max(1, x2 - x1), height: rect.height - 12)),
+                             with: .color(color.opacity(0.28)))
+                }
                 let bar = CGRect(x: x0, y: rect.minY + 3,
                                  width: max(1.5, x1 - x0), height: rect.height - 6)
                 ctx.fill(Path(bar), with: .color(color))

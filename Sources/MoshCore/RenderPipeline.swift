@@ -28,6 +28,11 @@ public struct RenderRequest: Sendable {
     /// families the same way, because it acts on finished pictures rather
     /// than on any one effect's parameters.
     public var mix: Double = 1
+    /// How long the damage an effect leaves behind lingers after the effect
+    /// ends, in seconds, before a clean keyframe resets the picture. nil
+    /// means never: the smear runs until something else repaints the frame,
+    /// which is how every render behaved before this existed.
+    public var smear: Double? = nil
 
     public init(input: URL, output: URL, events: [TriggerEvent], rules: [MoshRule],
                 vectorRules: [VectorRule] = [],
@@ -99,6 +104,30 @@ public final class RenderPipeline: @unchecked Sendable {
         if token.isCancelled { throw RenderError.cancelled }
     }
 
+    /// Seconds (relative to the start of the rendered range) at which to
+    /// force a clean keyframe: `smear` after the end of every op.
+    private func healTimes(_ request: RenderRequest, info: VideoInfo, smear: Double) -> [Double] {
+        let base = request.trim?.lowerBound ?? 0
+        let end = request.trim?.upperBound ?? info.duration
+        let rate = info.frameRate
+        let frames = Int(((end - base) * rate).rounded())
+        guard rate > 0, frames > 0 else { return [] }
+
+        let shifted = request.events.map { e -> TriggerEvent in
+            var c = e; c.time -= base; return c
+        }
+        let ends = TriggerCompiler.compile(events: shifted, rules: request.rules,
+                                           frameRate: rate, frameCount: frames,
+                                           seed: request.seed).map(\.endFrame)
+            + VectorTriggerCompiler.compile(events: shifted, rules: request.vectorRules,
+                                            frameRate: rate, frameCount: frames,
+                                            seed: request.seed).map(\.endFrame)
+        // A hair early, so float error cannot push the forced keyframe onto
+        // the frame after the one intended.
+        return ends.map { Double($0) / rate + smear - 0.001 }
+            .filter { $0 > 0.05 && $0 < Double(frames) / rate }
+    }
+
     /// Encode → mosh → decode.
     public func run(_ request: RenderRequest,
                     progress: @escaping @Sendable (RenderProgress) -> Void) throws -> RenderReport {
@@ -141,6 +170,17 @@ public final class RenderPipeline: @unchecked Sendable {
                 .filter { $0 > 0.05 }
                 .sorted()
         }
+        // Heal points: a keyframe can only be put in the stream at encode
+        // time, so the ops are compiled once here, from the probed rate,
+        // purely to find where each one ends. Compilation is seeded, so these
+        // are the same ops compiled again after the encode. MoshEngine never
+        // strips a keyframe outside an op's own range, so each heal keyframe
+        // survives and resets the picture — unless a later effect covers it,
+        // in which case that effect's smear carries on, as it should.
+        if let smear = request.smear {
+            opts.keyframeTimes = (opts.keyframeTimes + healTimes(request, info: info, smear: smear))
+                .sorted()
+        }
 
         try tool.encodeMoshable(input: request.input, output: rawAVI, options: opts,
                                 token: token) { f in
@@ -180,9 +220,14 @@ public final class RenderPipeline: @unchecked Sendable {
             try checkCancelled()
 
             let script = VectorEngine.generateScript(ops: vectorOps, frameCount: doc.frameCount)
+            // The vector pass re-encodes, so the forced keyframes — trigger
+            // points and heal points — have to be forced again in ffgac, or
+            // they are lost and ffgac's own scene-change detection decides
+            // where the keyframes go instead.
             try vectorTool.moshVectors(rawYUV: rawYUV, width: doc.width, height: doc.height,
                                        frameRate: doc.frameRate, script: script,
-                                       quality: request.quality, token: token,
+                                       quality: request.quality,
+                                       keyframeTimes: opts.keyframeTimes, token: token,
                                        output: editedStream)
             try checkCancelled()
 

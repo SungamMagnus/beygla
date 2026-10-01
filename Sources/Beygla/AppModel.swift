@@ -178,6 +178,13 @@ public final class AppModel: ObservableObject {
 
     /// How much of the moshed picture shows over the clean source, 0...1.
     @Published public var mix: Double = 1
+
+    // MARK: Smear
+
+    /// Seconds the damage lingers after an effect ends before a clean
+    /// keyframe resets the picture; nil is "never", the default.
+    @Published public var smear: Double? = nil
+    public static let maxSmear: Double = 8
     @Published public var onsetSettings = OnsetSettings(sensitivity: 0.5, band: .low, holdOff: 0.12) {
         didSet {
             audioInput.settings = onsetSettings
@@ -553,6 +560,7 @@ public final class AppModel: ObservableObject {
         let trim = trimRange
         request.trim = trim
         request.mix = mix
+        request.smear = smear
         // A preview trades resolution for turnaround; the mosh itself is
         // identical, so what you see is what the full render will do.
         request.previewWidth = preview ? 640 : nil

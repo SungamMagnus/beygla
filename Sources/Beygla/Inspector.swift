@@ -481,7 +481,9 @@ struct Inspector: View {
             VStack(alignment: .leading, spacing: 10) {
                 Latch(label: "Strip every keyframe",
                       on: $model.moshSettings.purgeAllKeyframes, color: Sungam.steel)
-                Text("The picture never resets — the whole clip becomes one continuous smear.")
+                Text(model.moshSettings.purgeAllKeyframes && model.smear != nil
+                     ? "The picture never resets — this also strips Smear's heal points, so Smear has no effect while it is on."
+                     : "The picture never resets — the whole clip becomes one continuous smear.")
                     .font(Sungam.mono(Sungam.textSm))
                     .foregroundStyle(Sungam.ink45)
                     .lineSpacing(3)
