@@ -43,6 +43,12 @@ func usage() -> Never {
                                      instead of detecting them
           --live 2.0-4.0,6.0-7.0     only let the effect fire inside these spans
           --purge                    strip every keyframe in the clip
+          --bpm 128                  trigger on a tempo grid instead of onsets
+          --note quarter             grid note: bar|half|quarter|eighth|sixteenth|
+                                     quarterTriplet|eighthTriplet
+          --grid-offset 0.25         where beat 1 falls, in seconds
+          --in 2.5 --out 6.5         render only this part of the clip
+          --mix 0.6                  how much mosh shows over the clean source
           --vector-effect KIND       add a vector effect (needs ffgac/ffedit)
                                      sink|stop|invertReverse|mirror|vibrate|
                                      zoom|slamZoom|shear|delay|shift|noise
@@ -142,6 +148,12 @@ do {
         let audioOverride = option("audio").map { URL(fileURLWithPath: $0) }
         let vectorKindRaw = option("vector-effect")
         let vectorDuration = option("vector-dur").flatMap { Double($0) } ?? 0.3
+        let bpm = option("bpm").flatMap { Double($0) }
+        let note = option("note").flatMap { NoteValue(rawValue: $0) } ?? .quarter
+        let gridOffset = option("grid-offset").flatMap { Double($0) } ?? 0
+        let inPoint = option("in").flatMap { Double($0) }
+        let outPoint = option("out").flatMap { Double($0) }
+        let mix = option("mix").flatMap { Double($0) } ?? 1
 
         // The detector listens to whatever will end up on the render.
         let manualTimes = option("at")?
@@ -149,9 +161,17 @@ do {
             .compactMap { Double($0.trimmingCharacters(in: .whitespaces)) }
 
         let events: [TriggerEvent]
+        var ruleSource: TriggerSource = .audio
         if let times = manualTimes {
             events = times.map { TriggerEvent(time: $0, strength: 1.0, source: .manual) }
             print("placed \(events.count) triggers by hand")
+        } else if let bpm {
+            let settings = SyncSettings(bpm: bpm, noteValue: note, offset: gridOffset)
+            let duration = try tool.probe(input).duration
+            events = SyncGrid.events(settings: settings, duration: duration)
+            ruleSource = .sync
+            print(String(format: "sync grid: %.1f BPM, %@ notes, %d hits every %.3fs",
+                         bpm, note.displayName, events.count, settings.interval))
         } else {
             let pcm = try tool.extractPCM(from: audioOverride ?? input)
             let onsets = pcm.isEmpty ? [] :
@@ -177,7 +197,8 @@ do {
                 .joined(separator: ", "))
         }
 
-        let rules = [MoshRule(kind: kind, source: .audio, band: onsetSettings.band,
+        let rules = [MoshRule(kind: kind, source: ruleSource,
+                              band: ruleSource == .audio ? onsetSettings.band : nil,
                               duration: duration, activeRegions: regions)]
 
         var request = RenderRequest(input: input, output: output, events: events, rules: rules)
@@ -195,11 +216,23 @@ do {
                     "error: \(FFglitchError.notInstalled.localizedDescription)\n".utf8))
                 exit(1)
             }
-            request.vectorRules = [VectorRule(kind: vKind, source: .audio,
-                                              band: onsetSettings.band, duration: vectorDuration)]
+            request.vectorRules = [VectorRule(kind: vKind, source: ruleSource,
+                                              band: ruleSource == .audio ? onsetSettings.band : nil,
+                                              duration: vectorDuration)]
         }
         request.quality = quality
         request.previewWidth = width
+        request.mix = max(0, min(1, mix))
+        if inPoint != nil || outPoint != nil {
+            let lo = max(0, inPoint ?? 0)
+            let hi = try outPoint ?? tool.probe(input).duration
+            guard hi > lo else {
+                FileHandle.standardError.write(Data("error: --out must come after --in\n".utf8))
+                exit(1)
+            }
+            request.trim = lo ... hi
+            print(String(format: "rendering %.2f-%.2fs", lo, hi))
+        }
 
         let reporter = StageReporter()
         let pipeline = RenderPipeline(tool: tool, vectorTool: vectorTool)

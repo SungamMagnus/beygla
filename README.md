@@ -164,12 +164,21 @@ of the stream's VOL header, which is not byte-aligned, so `MPEG4Skip.swift`
 walks it bit by bit.
 
 That frame still produces no decoder output — but it leaves a correctly sized
-**hole in the presentation timeline**, and decoding with `-fps_mode cfr` refills
-the hole by repeating the last picture. Frame count restored exactly, sync
-intact, and the intermediate AVI stays playable in other tools.
+**hole in the presentation timeline**, and the decode pass refills the hole by
+repeating the last picture. Frame count restored exactly, sync intact, and the
+intermediate AVI stays playable in other tools.
 
-Verified across all seven effects at 30 fps (240 frames in → 240 out) and at
-23.976 fps (143 → 143, `24000/1001` preserved).
+The refill is done by ffmpeg's `fps` filter, which places each frame at
+`round(pts × rate)`. It used to be left to `-fps_mode cfr` alone, and that
+turned out to be a frame off: cfr's duplication logic biases by −0.6 of a frame
+when it meets a gap, so after every hold it put the next frame one slot early
+and then repeated it to catch up. An 18-frame freeze on a kick at frame 30
+released at frame 47 instead of 48. The frame count was always right, so every
+check that counted frames passed; it took comparing renders frame by frame to
+see it. Now the held span is exactly frames 30–47 and the release lands on 48.
+
+Verified across all twenty-six effects at 30 fps (240 frames in → 240 out) and
+at 23.976 fps (143 → 143, `24000/1001` preserved).
 
 ### Onset detection
 
@@ -279,6 +288,73 @@ blocks for as long as it takes. On a 90-second 1080p clip whose full render
 takes 32 seconds, cancelling returns in under two, leaves no stray process and
 removes the partial file.
 
+### Sync to a tempo
+
+Set the trigger source to **Sync** and effects fire on a fixed grid instead of
+on detected transients. Set the tempo with the knob (which snaps to whole BPM),
+the field (which takes decimals), ±1, or **Tap** along — the last eight taps
+are averaged, and a pause of two seconds starts a new count. Pick the note
+length from a bar down to sixteenths, with quarter and eighth triplets.
+
+Put **beat 1** where the track's downbeat falls with *Set at playhead*. Hits
+before beat 1 are still generated, counting backward, so a track with a pickup
+is covered. With *Accent the downbeat* on, beat 1 of each bar fires at full
+strength and the rest at about half, so an effect's Velocity knob makes the
+downbeat hit hardest.
+
+Positions are computed as `offset + n × interval` from an integer n rather than
+by adding the interval repeatedly, so a long clip does not accumulate
+floating-point drift and land its last hits late.
+
+Switching the source to Sync does not move existing effects: each keeps
+listening to the source it was set to, so grid-driven and audio-driven effects
+can run in the same render. The source panel says when effects are listening
+elsewhere and offers to move them all in one step.
+
+### In and out
+
+**I** and **O** (or the *In* and *Out* buttons) set the range at the playhead;
+*Clear* goes back to the whole clip. Outside the range the timeline washes
+back, and both Preview and Render cover only the range — encoding starts at the
+in point, so a 4-second range on a long file costs 4 seconds of work. Setting In
+after Out clears Out, the way an edit suite does, rather than leaving an
+inverted range.
+
+A trimmed result starts at zero but represents a slice that starts at the in
+point, so the timeline works in one frame of reference throughout: while the
+Result is playing, its playhead, scrubbing, the timecode and live capture are
+all offset by where that render began. Source and Result line up when you flip
+between them.
+
+Triggers before the in point are dropped, and one whose effect straddles it is
+clipped to the part inside — previously a pre-trim trigger would have had its
+start clamped to frame 0 with its full length kept, piling every one of them
+onto the first frame. Trimming also exposed that the video's own audio was
+never seeked to the in point (only an override track was); it is now, verified
+by rendering 2.5–6.5 s and finding the source's kicks at 3, 4, 5 and 6 s land at
+0.50, 1.50, 2.50 and 3.50 s in the output.
+
+### Mix
+
+**Mix** beside Preview and Render is the global amount: how much of the
+moshed picture shows over the clean source, from 100% (the mosh alone) to 0%
+(the clean clip). Double-click its readout to return to 100%.
+
+It is a wet/dry blend of finished pictures rather than a scale on each
+effect's own Amount, and that is deliberate. A global multiplier on Amount
+would be inconsistent at best: six of the fifteen bitstream effects ignore
+Amount entirely, Sort uses it as a direction switch, and Zoom and Shear are
+bipolar around the middle of the knob — scaling them toward zero would turn a
+zoom-out into a zoom-in. The blend acts the same way on every effect in both
+families. Measured on a frame mid-clip, the difference from the clean source
+scales linearly: 1.00, 0.75, 0.50, 0.25 and 0.00 of full at 100, 75, 50, 25 and
+0%.
+
+Held frames survive it. Inside a freeze, each 50% frame matches the average of
+the 100% render and the clean source to within about 1.5 grey levels, while
+differing from clean alone by about 30 — the mosh layer is held through the
+gaps, not replaced by the clean picture.
+
 ### Zooming the timeline
 
 A long file needs more than the whole-clip view to edit precisely. The **Zoom**
@@ -338,6 +414,10 @@ beyglactl render clip.mp4 out.mp4 \
     --effect jiggle --live 2.0-4.0         # only fire inside a span
 beyglactl render clip.mp4 out.mp4 \
     --vector-effect sink --vector-dur 0.3  # a vector effect
+beyglactl render clip.mp4 out.mp4 \
+    --bpm 128 --note eighth --effect stutter   # trigger on a tempo grid
+beyglactl render clip.mp4 out.mp4 \
+    --in 12.0 --out 20.0 --mix 0.6         # a range, at 60% mix
 beyglactl list-vector-effects              # print all eleven, with their DMP source
 beyglactl render clip.mp4 out.mp4 \
     --cancel-after 2                       # debug: prove cancelling kills ffmpeg
@@ -408,7 +488,7 @@ absolutely. Beygla's:
 | Hue | Means |
 |---|---|
 | **Coral** | The trigger path — everything that decides *when*. Onsets, the detection curve, audio triggers. |
-| **Teal** | The effect engine — everything that decides *what*. |
+| **Teal** | The effect engine — everything that decides *what*. Also the sync grid, its ticks and its panel. |
 | **Steel** | The render chain — everything after the ops are applied. MIDI triggers, stream settings, progress. |
 | **Violet** | Modulation, and only modulation: the four parameters that move another parameter (velocity, chance, jitter, offset). |
 | **Amber** | The live state, and nothing else. Armed, the input lamp, the top meter segment. |

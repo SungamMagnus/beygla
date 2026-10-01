@@ -28,6 +28,15 @@ else
   echo "    clean: no GPL components"
 fi
 
+echo "==> Filters the output Mix needs"
+for f in blend setsar fps; do
+  if env -i "$APP/ffmpeg" -hide_banner -filters 2>/dev/null | grep -q " $f "; then
+    echo "    $f"
+  else
+    echo "    MISSING: $f"; exit 1
+  fi
+done
+
 echo "==> Encoders that matter"
 for e in mpeg4 h264_videotoolbox aac; do
   if env -i "$APP/ffmpeg" -hide_banner -encoders 2>/dev/null | grep -q " $e"; then

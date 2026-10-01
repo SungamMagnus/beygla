@@ -23,6 +23,11 @@ public struct RenderRequest: Sendable {
     public var previewWidth: Int?
     public var trim: ClosedRange<Double>?
     public var seed: UInt64
+    /// How much of the moshed picture shows over the clean source in the
+    /// output, 0...1. The one control that scales every effect in both
+    /// families the same way, because it acts on finished pictures rather
+    /// than on any one effect's parameters.
+    public var mix: Double = 1
 
     public init(input: URL, output: URL, events: [TriggerEvent], rules: [MoshRule],
                 vectorRules: [VectorRule] = [],
@@ -207,14 +212,26 @@ public final class RenderPipeline: @unchecked Sendable {
         //    there is one, otherwise the video's own track. CFR output is what
         //    refills the held frames and keeps sync.
         let audio: URL? = request.audioSource ?? (info.hasAudio ? request.input : nil)
-        // A trim moves the video's start, and an external track is laid against
-        // the original timeline, so the audio has to be seeked by the same amount.
-        let audioStart = request.audioSource != nil ? (request.trim?.lowerBound ?? 0) : 0
+        // A trim moves the video's start, so whichever audio is muxed back has
+        // to be seeked by the same amount. This used to apply only to an
+        // override track, on the reasoning that it was laid against the
+        // original timeline — but so is the video's own track, which was
+        // left playing from zero against video starting at the in point.
+        // Trim had no UI until now, so nothing ever exercised it.
+        let audioStart = request.trim?.lowerBound ?? 0
+
+        let mix: FFmpegTool.OutputMix? = request.mix < 0.999
+            ? FFmpegTool.OutputMix(source: request.input, trim: request.trim,
+                                   width: doc.width, height: doc.height,
+                                   amount: request.mix)
+            : nil
+
         try tool.decodeMoshed(avi: moshedAVI,
                               audioFrom: audio,
                               audioStart: audioStart,
                               output: request.output,
                               frameRate: doc.frameRate,
+                              mix: mix,
                               token: token) { f in
             progress(.init(stage: .decoding, fraction: f))
         }

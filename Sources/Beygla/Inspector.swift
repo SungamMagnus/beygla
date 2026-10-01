@@ -14,6 +14,7 @@ struct Inspector: View {
                 sourcePanel
                 if model.triggerSource == .audio { detectionPanel }
                 if model.triggerSource == .midi { midiPanel }
+                if model.triggerSource == .sync { syncPanel }
                 effectsPanel
                 vectorEffectsPanel
                 streamPanel
@@ -105,7 +106,9 @@ struct Inspector: View {
                     .lineSpacing(4)
                     .fixedSize(horizontal: false, vertical: true)
 
-                if model.triggerSource != .manual {
+                // Only a live source can be armed; the grid is generated and a
+                // hand-placed trigger is placed, neither is performed.
+                if model.triggerSource == .audio || model.triggerSource == .midi {
                     HStack(spacing: 8) {
                         Lamp(on: model.isArmed, color: Sungam.amber, size: 9)
                         Latch(label: model.isArmed ? "Armed — disarm" : "Arm live capture",
@@ -114,6 +117,23 @@ struct Inspector: View {
                                 set: { model.setArmed($0) }
                               ),
                               color: Sungam.amber)
+                    }
+                }
+
+                // Switching source does not move existing effects — each keeps
+                // listening to what it was set to — so say so, and offer the
+                // one-step way to move them.
+                if model.triggerSource != .manual && model.effectsOnOtherSources > 0 {
+                    HStack(spacing: 8) {
+                        Text("\(model.effectsOnOtherSources) effect\(model.effectsOnOtherSources == 1 ? "" : "s") still listen\(model.effectsOnOtherSources == 1 ? "s" : "") to another source.")
+                            .font(Sungam.mono(Sungam.text2xs))
+                            .foregroundStyle(Sungam.ink55)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Spacer()
+                        LatchButton(label: "Move to \(model.triggerSource.displayName)",
+                                    color: Sungam.coral) {
+                            model.moveAllEffects(to: model.triggerSource)
+                        }
                     }
                 }
             }
@@ -130,8 +150,87 @@ struct Inspector: View {
             return model.isArmed
                 ? "Listening for note-ons. Play the clip and hit pads to place triggers."
                 : "Arm, then perform on a controller. Bind a rule to one note to give it its own pad."
+        case .sync:
+            return "Triggers on a fixed tempo grid. Set the BPM and note length, then put beat 1 where the track's downbeat falls."
         case .manual:
             return "Double-click the timeline to place triggers by hand."
+        }
+    }
+
+    // MARK: Sync — teal, matching the grid's ticks on the timeline
+
+    private var bpmBinding: Binding<Double> {
+        Binding(
+            get: { model.syncSettings.bpm },
+            set: { v in
+                let r = SyncSettings.bpmRange
+                model.syncSettings.bpm = min(max(v, r.lowerBound), r.upperBound)
+            })
+    }
+
+    private var syncPanel: some View {
+        PanelFrame(title: "Sync", color: Sungam.teal) {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .center, spacing: 14) {
+                    // The knob snaps to whole BPM — most tracks are — and the
+                    // field takes a decimal for the ones that are not.
+                    Knob(label: "Tempo",
+                         value: Binding(get: { model.syncSettings.bpm },
+                                        set: { bpmBinding.wrappedValue = $0.rounded() }),
+                         range: SyncSettings.bpmRange, radius: 22, color: Sungam.teal,
+                         format: { String(format: "%.0f", $0) })
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack(spacing: 6) {
+                            TextField("", value: bpmBinding,
+                                      format: .number.precision(.fractionLength(0 ... 2)))
+                                .textFieldStyle(.plain)
+                                .font(Sungam.mono(Sungam.textLg, weight: .bold))
+                                .foregroundStyle(Sungam.teal)
+                                .multilineTextAlignment(.trailing)
+                                .frame(width: 70 * Sungam.scale / 1.25)
+                                .padding(.horizontal, 6).padding(.vertical, 3)
+                                .overlay(Rectangle().stroke(Sungam.ink28, lineWidth: Sungam.hairline))
+                            Text("BPM")
+                                .font(Sungam.mono(Sungam.textSm))
+                                .foregroundStyle(Sungam.ink62)
+                        }
+                        HStack(spacing: 5) {
+                            LatchButton(label: "−1") { bpmBinding.wrappedValue = (model.syncSettings.bpm - 1).rounded() }
+                            LatchButton(label: "+1") { bpmBinding.wrappedValue = (model.syncSettings.bpm + 1).rounded() }
+                            LatchButton(label: "Tap", color: Sungam.teal) { model.tapTempo() }
+                        }
+                    }
+                    Spacer()
+                }
+
+                Selector(options: NoteValue.allCases.map { ($0, $0.displayName) },
+                         selection: $model.syncSettings.noteValue, color: Sungam.teal)
+
+                HStack(spacing: 8) {
+                    LabelValue(label: "Beat 1",
+                               value: String(format: "%.3fs", model.syncSettings.offset),
+                               color: Sungam.teal, size: Sungam.textSm)
+                    Spacer()
+                    LatchButton(label: "Set at playhead") { model.setDownbeatAtPlayhead() }
+                    LatchButton(label: "Zero", enabled: model.syncSettings.offset != 0) {
+                        model.syncSettings.offset = 0
+                    }
+                }
+
+                Latch(label: "Accent the downbeat",
+                      on: $model.syncSettings.accentDownbeat, color: Sungam.teal)
+                Text("Beat 1 of each bar fires at full strength and the rest at about half, so an effect's Velocity knob makes the downbeat hit hardest.")
+                    .font(Sungam.mono(Sungam.text2xs))
+                    .foregroundStyle(Sungam.ink45)
+                    .lineSpacing(3)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                let hits = model.events.filter { $0.source == .sync }.count
+                Text("\(hits) hits, one every \(String(format: "%.0f", model.syncSettings.interval * 1000)) ms")
+                    .font(Sungam.mono(Sungam.text2xs))
+                    .foregroundStyle(Sungam.ink55)
+            }
         }
     }
 

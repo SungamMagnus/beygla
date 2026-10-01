@@ -277,15 +277,17 @@ public enum VectorTriggerCompiler {
                 }
 
                 let start = Int(((event.time + rule.offset) * frameRate).rounded())
-                let length = max(1, Int((duration * frameRate).rounded()))
-                guard start < frameCount else { continue }
+                let end = start + max(1, Int((duration * frameRate).rounded()))
+                let lo = max(0, start)
+                let hi = min(frameCount, end)
+                guard lo < hi else { continue }
 
                 let amount = min(1.0, max(0.0,
                     rule.amountFloor + event.strength * rule.strengthInfluence))
 
                 ops.append(VectorOp(kind: rule.kind,
-                                    startFrame: max(0, start),
-                                    length: min(length, frameCount - max(0, start)),
+                                    startFrame: lo,
+                                    length: hi - lo,
                                     amount: amount,
                                     seed: rng.next()))
             }

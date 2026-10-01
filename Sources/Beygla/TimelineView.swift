@@ -106,6 +106,7 @@ struct TimelineView: View {
                     drawFlux(ctx, size: size)
                     drawLanes(ctx, size: size)
                     drawTriggers(ctx, size: size)
+                    drawInOut(ctx, size: size)
                     drawPlayhead(ctx, size: size)
                 }
                 .contentShape(Rectangle())
@@ -332,10 +333,11 @@ struct TimelineView: View {
         for event in model.events {
             let px = x(event.time, size.width)
             // Source is read from the tick's colour: coral for audio, steel for
-            // MIDI, plain ink for a hand-placed one.
+            // MIDI, teal for the sync grid, plain ink for a hand-placed one.
             let c: Color = switch event.source {
             case .audio: Sungam.coral
             case .midi: Sungam.steel
+            case .sync: Sungam.teal
             case .manual: Sungam.ink70
             }
             var path = Path()
@@ -349,8 +351,45 @@ struct TimelineView: View {
         }
     }
 
+    /// The render range. Everything outside it is washed back with paper, so
+    /// what Preview and Render will cover reads at a glance, and the two
+    /// edges are marked in steel — the render-chain colour.
+    private func drawInOut(_ ctx: GraphicsContext, size: CGSize) {
+        guard model.inPoint != nil || model.outPoint != nil else { return }
+        let lo = model.inPoint ?? 0
+        let hi = model.outPoint ?? duration
+        let xl = x(lo, size.width), xr = x(hi, size.width)
+
+        if xl > 0 {
+            ctx.fill(Path(CGRect(x: 0, y: 0, width: xl, height: size.height)),
+                     with: .color(Sungam.paper.opacity(0.72)))
+        }
+        if xr < size.width {
+            ctx.fill(Path(CGRect(x: xr, y: 0, width: size.width - xr, height: size.height)),
+                     with: .color(Sungam.paper.opacity(0.72)))
+        }
+
+        for (t, label, isIn) in [(model.inPoint, "IN", true), (model.outPoint, "OUT", false)] {
+            guard let t else { continue }
+            let px = x(t, size.width)
+            var line = Path()
+            line.move(to: CGPoint(x: px, y: 0))
+            line.addLine(to: CGPoint(x: px, y: size.height))
+            ctx.stroke(line, with: .color(Sungam.steel), lineWidth: Sungam.borderStrong)
+            // A flag on the inside of the range, so the label never sits
+            // over the part being thrown away.
+            let flagW: Double = isIn ? 22 : 28
+            let flag = CGRect(x: isIn ? px : px - flagW, y: 0, width: flagW, height: 13)
+            ctx.fill(Path(flag), with: .color(Sungam.steel))
+            ctx.draw(Text(label)
+                        .font(Sungam.mono(Sungam.text2xs, weight: .bold))
+                        .foregroundStyle(Sungam.paper),
+                     at: CGPoint(x: flag.midX, y: flag.midY), anchor: .center)
+        }
+    }
+
     private func drawPlayhead(_ ctx: GraphicsContext, size: CGSize) {
-        let px = x(model.currentTime, size.width)
+        let px = x(model.timelinePlayheadTime, size.width)
         var path = Path()
         path.move(to: CGPoint(x: px, y: 0))
         path.addLine(to: CGPoint(x: px, y: size.height))

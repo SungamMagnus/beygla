@@ -17,6 +17,7 @@ public enum FFmpegError: Error, LocalizedError {
     case notInstalled
     case failed(command: String, status: Int32, log: String)
     case badProbeOutput(String)
+    case missingFilter(String)
 
     public var errorDescription: String? {
         switch self {
@@ -28,6 +29,9 @@ public enum FFmpegError: Error, LocalizedError {
             return "ffmpeg \(cmd) failed (exit \(status)):\n\(tail)"
         case .badProbeOutput(let s):
             return "Could not read media info: \(s)"
+        case .missingFilter(let name):
+            return "This ffmpeg build has no \(name) filter, which the output Mix needs. "
+                 + "Rebuild the bundled one with tools/build-ffmpeg.sh, or set Mix to 100%."
         }
     }
 }
@@ -92,6 +96,10 @@ public final class FFmpegTool: @unchecked Sendable {
     public struct Capabilities: Sendable {
         public var hasLibX264: Bool
         public var hasVideoToolbox: Bool
+        /// The output Mix needs the blend filter. Probed rather than assumed,
+        /// because a Mix below 100% that quietly rendered at 100% would be the
+        /// third silent failure of the same shape in this app.
+        public var hasBlend: Bool
         public var isBundled: Bool
         public var version: String
 
@@ -114,6 +122,7 @@ public final class FFmpegTool: @unchecked Sendable {
         self.ffprobe = ffprobe
 
         let encoders = (try? FFmpegTool.capture(ffmpeg, ["-hide_banner", "-encoders"])) ?? ""
+        let filters = (try? FFmpegTool.capture(ffmpeg, ["-hide_banner", "-filters"])) ?? ""
         let banner = (try? FFmpegTool.capture(ffmpeg, ["-version"])) ?? ""
         let version = banner
             .split(separator: "\n").first
@@ -122,6 +131,7 @@ public final class FFmpegTool: @unchecked Sendable {
         capabilities = Capabilities(
             hasLibX264: encoders.contains("libx264"),
             hasVideoToolbox: encoders.contains("h264_videotoolbox"),
+            hasBlend: filters.contains(" blend "),
             isBundled: isBundled,
             version: version)
     }
@@ -280,8 +290,28 @@ public final class FFmpegTool: @unchecked Sendable {
     /// the presentation timeline; CFR output refills those gaps by repeating the
     /// last picture, which restores the exact original frame count and keeps the
     /// result locked to the original audio.
+    /// The clean picture to lay the moshed one over, and how much of the
+    /// moshed one shows. `amount` 1 is the mosh alone; 0 is the clean source.
+    public struct OutputMix: Sendable {
+        public var source: URL
+        public var trim: ClosedRange<Double>?
+        public var width: Int
+        public var height: Int
+        public var amount: Double
+
+        public init(source: URL, trim: ClosedRange<Double>?, width: Int, height: Int,
+                    amount: Double) {
+            self.source = source
+            self.trim = trim
+            self.width = width
+            self.height = height
+            self.amount = amount
+        }
+    }
+
     public func decodeMoshed(avi: URL, audioFrom: URL?, audioStart: Double = 0,
                              output: URL, frameRate: Double, crf: Int = 18,
+                             mix: OutputMix? = nil,
                              token: ProcessToken? = nil,
                              progress: ((Double) -> Void)? = nil) throws {
         var args = [
@@ -290,13 +320,56 @@ public final class FFmpegTool: @unchecked Sendable {
             "-err_detect", "ignore_err",
             "-i", avi.path,
         ]
+        var nextInput = 1
+
+        // Mix below 100%: the clean source comes in as a second picture,
+        // trimmed exactly as the moshed one was encoded, and the two are
+        // blended frame for frame.
+        var mixFilter: String?
+        if let m = mix, m.amount < 0.999 {
+            guard capabilities.hasBlend else { throw FFmpegError.missingFilter("blend") }
+            if let t = m.trim {
+                args += ["-ss", String(t.lowerBound), "-to", String(t.upperBound)]
+            }
+            args += ["-i", m.source.path]
+            let clean = nextInput
+            nextInput += 1
+
+            // fps on the moshed side is doing the same job -fps_mode cfr does
+            // in the unmixed path, inside the graph instead: held frames come
+            // out of the decoder as gaps, and blend pairs frames by timestamp,
+            // so the gaps have to be refilled before the two pictures meet or
+            // a hold would show the clean frame instead of holding the mosh.
+            let r = String(frameRate)
+            let size = "\(m.width):\(m.height)"
+            let opacity = String(format: "%.4f", max(0, min(1, m.amount)))
+            mixFilter =
+                "[0:v]fps=\(r),scale=\(size),setsar=1,format=yuv420p[mosh];" +
+                "[\(clean):v]fps=\(r),scale=\(size),setsar=1,format=yuv420p[clean];" +
+                "[mosh][clean]blend=all_mode=normal:all_opacity=\(opacity):shortest=1[v]"
+        }
+
+        var audioInput: Int?
         if let a = audioFrom {
             if audioStart > 0 { args += ["-ss", String(audioStart)] }
             args += ["-i", a.path]
+            audioInput = nextInput
+            nextInput += 1
         }
 
-        args += ["-map", "0:v:0"]
-        if audioFrom != nil { args += ["-map", "1:a:0?"] }
+        if let f = mixFilter {
+            args += ["-filter_complex", f, "-map", "[v]"]
+        } else {
+            // The fps filter does the gap refill here too, rather than leaving
+            // it to -fps_mode cfr alone. cfr's duplication logic biases by
+            // -0.6 of a frame when it meets a gap, so after every hold it put
+            // the next frame one slot early and then repeated it to catch up:
+            // an 18-frame freeze on a kick released at frame 47 instead of 48.
+            // The frame count stayed right, which is why nothing caught it.
+            // The fps filter places each frame at round(pts * rate), exactly.
+            args += ["-map", "0:v:0", "-vf", "fps=\(frameRate)"]
+        }
+        if let ai = audioInput { args += ["-map", "\(ai):a:0?"] }
 
         args += ["-fps_mode", "cfr", "-r", String(frameRate)]
 

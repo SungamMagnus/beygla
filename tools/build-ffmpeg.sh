@@ -48,7 +48,10 @@ COMPONENTS=(
   --enable-parser=h264,hevc,mpeg4video,mpegvideo,aac,ac3,mpegaudio,flac,vp8,vp9,av1,opus,vorbis,dnxhd,mjpeg,png
   --enable-bsf=aac_adtstoasc,h264_mp4toannexb,hevc_mp4toannexb,extract_extradata,null,mpeg4_unpack_bframes
   --enable-protocol=file,pipe,fd
-  --enable-filter=scale,format,fps,null,anull,aformat,aresample,copy,trim,atrim,setpts,asetpts,crop,pad,scale_vt
+  # blend and setsar are for the output Mix: the moshed render laid over the
+  # clean source at partial opacity, which needs both pictures at matching
+  # size and sample aspect before they can be combined.
+  --enable-filter=scale,format,fps,null,anull,aformat,aresample,copy,trim,atrim,setpts,asetpts,crop,pad,scale_vt,blend,setsar
   --enable-videotoolbox
   --enable-audiotoolbox
   --enable-swscale

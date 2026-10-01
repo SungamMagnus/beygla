@@ -1,4 +1,5 @@
 import AVFoundation
+import AppKit
 import Combine
 import Foundation
 import MoshCore
@@ -37,8 +38,146 @@ public final class AppModel: ObservableObject {
     // MARK: Triggers
 
     @Published public var triggerSource: TriggerSource = .audio {
-        didSet { syncMIDILifecycle() }
+        didSet {
+            syncMIDILifecycle()
+            if triggerSource == .sync {
+                // A tempo grid is generated, not performed, so there is
+                // nothing to arm.
+                if isArmed { setArmed(false) }
+                regenerateSyncEvents()
+            }
+        }
     }
+
+    // MARK: Sync
+
+    @Published public var syncSettings = SyncSettings() {
+        didSet {
+            if triggerSource == .sync || events.contains(where: { $0.source == .sync }) {
+                regenerateSyncEvents()
+            }
+        }
+    }
+    private var tapTimes: [Double] = []
+
+    /// Replace the grid's hits with a fresh set for the current settings.
+    /// Only `.sync` events are touched — analysed onsets, hand-placed
+    /// triggers and anything captured live stay where they are.
+    public func regenerateSyncEvents() {
+        events.removeAll { $0.source == .sync }
+        guard let d = info?.duration, d > 0 else { return }
+        events += SyncGrid.events(settings: syncSettings, duration: d)
+        events.sort { $0.time < $1.time }
+    }
+
+    /// Tap along to set the tempo. Taps more than two seconds apart start
+    /// a new count; the last eight are averaged.
+    public func tapTempo() {
+        let now = ProcessInfo.processInfo.systemUptime
+        if let last = tapTimes.last, now - last > 2.0 { tapTimes.removeAll() }
+        tapTimes.append(now)
+        if tapTimes.count > 8 { tapTimes.removeFirst(tapTimes.count - 8) }
+        guard tapTimes.count >= 2 else { return }
+        let intervals = zip(tapTimes.dropFirst(), tapTimes).map { $0 - $1 }
+        let mean = intervals.reduce(0, +) / Double(intervals.count)
+        let bpm = (60 / mean * 10).rounded() / 10
+        syncSettings.bpm = min(max(bpm, SyncSettings.bpmRange.lowerBound),
+                               SyncSettings.bpmRange.upperBound)
+    }
+
+    public var tapCount: Int { tapTimes.count }
+
+    /// Put beat 1 under the playhead.
+    public func setDownbeatAtPlayhead() {
+        syncSettings.offset = timelinePlayheadTime
+    }
+
+    /// How many effects listen to something other than the selected source.
+    public var effectsOnOtherSources: Int {
+        rules.filter { $0.source != triggerSource }.count
+            + vectorRules.filter { $0.source != triggerSource }.count
+    }
+
+    /// Point every effect at one source. Switching the panel to Sync does not
+    /// do this by itself: effects keep listening to whatever they were set
+    /// to, so audio-driven and grid-driven effects can run in the same
+    /// render. This is the explicit way to move them all at once.
+    public func moveAllEffects(to source: TriggerSource) {
+        let band: OnsetBand? = source == .audio ? onsetSettings.band : nil
+        for i in rules.indices { rules[i].source = source; rules[i].band = band }
+        for i in vectorRules.indices { vectorRules[i].source = source; vectorRules[i].band = band }
+    }
+
+    // MARK: Keyboard
+
+    private var keyMonitor: Any?
+
+    /// Space plays, I and O set the range.
+    ///
+    /// These are a local event monitor rather than menu-item shortcuts. A
+    /// bare-letter menu shortcut is matched before the focused view sees the
+    /// key, so it would swallow a space or an "o" typed into the BPM field.
+    /// The monitor checks first and lets the key through when text is being
+    /// edited. Local monitors run synchronously on the main thread during
+    /// event dispatch, which is what makes `assumeIsolated` correct here — it
+    /// is the audio tap's real-time thread where that promise was false.
+    private func installKeyboardShortcuts() {
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self else { return event }
+            if NSApp.keyWindow?.firstResponder is NSText { return event }
+            let mods = event.modifierFlags.intersection([.command, .control, .option])
+            guard mods.isEmpty else { return event }
+            let handled: Bool = MainActor.assumeIsolated {
+                switch event.charactersIgnoringModifiers?.lowercased() {
+                case " ": self.togglePlay(); return true
+                case "i": self.setInPoint(); return true
+                case "o": self.setOutPoint(); return true
+                default: return false
+                }
+            }
+            return handled ? nil : event
+        }
+    }
+
+    // MARK: In and out
+
+    /// Where the render starts and stops, in seconds on the source. Either
+    /// can be unset, meaning the start or end of the clip.
+    @Published public var inPoint: Double?
+    @Published public var outPoint: Double?
+    public static let minTrimLength = 0.1
+
+    public func setInPoint() {
+        let t = timelinePlayheadTime
+        inPoint = t
+        // Setting In past Out clears Out, the way an edit suite does, rather
+        // than leaving an inverted range that renders nothing.
+        if let o = outPoint, o < t + Self.minTrimLength { outPoint = nil }
+    }
+
+    public func setOutPoint() {
+        let t = timelinePlayheadTime
+        outPoint = t
+        if let i = inPoint, i > t - Self.minTrimLength { inPoint = nil }
+    }
+
+    public func clearInOut() {
+        inPoint = nil
+        outPoint = nil
+    }
+
+    /// The range a render covers, or nil for the whole clip.
+    public var trimRange: ClosedRange<Double>? {
+        guard inPoint != nil || outPoint != nil, let d = info?.duration else { return nil }
+        let lo = max(0, inPoint ?? 0)
+        let hi = min(d, outPoint ?? d)
+        return hi - lo >= Self.minTrimLength ? lo ... hi : nil
+    }
+
+    // MARK: Mix
+
+    /// How much of the moshed picture shows over the clean source, 0...1.
+    @Published public var mix: Double = 1
     @Published public var onsetSettings = OnsetSettings(sensitivity: 0.5, band: .low, holdOff: 0.12) {
         didSet {
             audioInput.settings = onsetSettings
@@ -50,7 +189,9 @@ public final class AppModel: ObservableObject {
         }
     }
     @Published public var events: [TriggerEvent] = []
-    @Published public var rules: [MoshRule] = MoshRule.defaultSet()
+    /// Empty on launch: no effect is assumed. Every rule on the panel is one
+    /// someone chose to add.
+    @Published public var rules: [MoshRule] = []
     /// The second effect family — motion vectors rewritten inside frames.
     /// Empty by default: it needs the vector engine (ffgac/ffedit), which is
     /// a separate optional download, so a project that never touches this
@@ -172,6 +313,8 @@ public final class AppModel: ObservableObject {
                                 source: .midi, note: note.number)
         }
 
+        installKeyboardShortcuts()
+
         timeObserver = player.addPeriodicTimeObserver(
             forInterval: CMTime(seconds: 1.0 / 60.0, preferredTimescale: 600),
             queue: .main
@@ -206,6 +349,9 @@ public final class AppModel: ObservableObject {
         }
 
         resetTimelineZoom()
+        clearInOut()
+        resultTimeOffset = 0
+        if triggerSource == .sync { regenerateSyncEvents() }
         showPlayback(.source, preserveTime: false)
         Task { await analyseTrack() }
     }
@@ -264,15 +410,21 @@ public final class AppModel: ObservableObject {
         guard !rawFlux.isEmpty else { return }
         let onsets = OnsetDetector.pickPeaks(flux: rawFlux, sampleRate: sampleRate,
                                              settings: onsetSettings)
-        events = onsets.map {
+        // Replace only the analysed onsets. This used to reassign `events`
+        // wholesale, so nudging the sensitivity knob wiped every hand-placed
+        // and live-captured trigger along with them.
+        events.removeAll { $0.source == .audio && $0.band != nil }
+        events += onsets.map {
             TriggerEvent(time: $0.time, strength: $0.strength,
                          source: .audio, band: onsetSettings.band)
         }
+        events.sort { $0.time < $1.time }
     }
 
     // MARK: - Live capture
 
     public func setArmed(_ armed: Bool) {
+        guard !(armed && triggerSource == .sync) else { return }
         isArmed = armed
         if armed {
             // Live hits replace analysed ones — you are performing the mosh now.
@@ -298,7 +450,7 @@ public final class AppModel: ObservableObject {
     private func recordLiveHit(strength: Double, source: TriggerSource, note: Int?) {
         liveHitFlash = Date()
         guard isArmed else { return }
-        let t = currentTime
+        let t = timelinePlayheadTime
         guard t.isFinite, t >= 0 else { return }
         events.append(TriggerEvent(time: t, strength: strength, source: source, note: note))
         events.sort { $0.time < $1.time }
@@ -351,15 +503,33 @@ public final class AppModel: ObservableObject {
 
     public func togglePlay() {
         if player.rate == 0 {
-            if let d = info?.duration, currentTime >= d - 0.05 { player.seek(to: .zero) }
+            // The loaded file's own length, which for a trimmed result is
+            // shorter than the source's.
+            let d = player.currentItem?.duration.seconds ?? info?.duration ?? 0
+            if d.isFinite, d > 0, currentTime >= d - 0.05 { player.seek(to: .zero) }
             player.play()
         } else {
             player.pause()
         }
     }
 
+    /// Where the playhead is on the *source*. A trimmed result file starts at
+    /// zero but begins at the in point, so while it is playing its own time
+    /// is offset by where its render began. The timeline, the timecode, live
+    /// capture and In/Out all work in this one frame of reference, so a
+    /// moment means the same thing whichever file is loaded.
+    public var timelinePlayheadTime: Double {
+        playbackSource == .result ? currentTime + resultTimeOffset : currentTime
+    }
+
+    /// Source-timeline start of the result currently loaded — the in point
+    /// it was rendered with, not the current one, which may since have moved.
+    @Published public private(set) var resultTimeOffset: Double = 0
+
+    /// Seek to a moment on the source timeline, whichever file is loaded.
     public func seek(to time: Double) {
-        player.seek(to: CMTime(seconds: max(0, time), preferredTimescale: 600),
+        let local = playbackSource == .result ? time - resultTimeOffset : time
+        player.seek(to: CMTime(seconds: max(0, local), preferredTimescale: 600),
                     toleranceBefore: .zero, toleranceAfter: .zero)
     }
 
@@ -378,6 +548,11 @@ public final class AppModel: ObservableObject {
         request.vectorRules = vectorRules
         request.audioSource = audioURL
         request.settings = moshSettings
+        // In/out and Mix apply to Preview and Render alike: a preview of the
+        // range you are working on, at the mix you will render with.
+        let trim = trimRange
+        request.trim = trim
+        request.mix = mix
         // A preview trades resolution for turnaround; the mosh itself is
         // identical, so what you see is what the full render will do.
         request.previewWidth = preview ? 640 : nil
@@ -403,8 +578,13 @@ public final class AppModel: ObservableObject {
                     // first trigger, and roll. Rendering and then leaving a
                     // paused first frame on screen is how this managed to look
                     // like it had done nothing twice over.
+                    // The result's frame 0 is the in point it was rendered
+                    // with; record that before switching so the playhead
+                    // conversion uses this render's offset, not whatever
+                    // In is set to by the time someone looks.
+                    self.resultTimeOffset = trim?.lowerBound ?? 0
                     self.showPlayback(.result,
-                                      startAt: self.firstInterestingTime,
+                                      startAt: self.firstInterestingTime(within: trim),
                                       autoPlay: true)
                 }
             } catch {
@@ -432,7 +612,10 @@ public final class AppModel: ObservableObject {
     public func showPlayback(_ source: PlaybackSource, preserveTime: Bool = true,
                              startAt: Double? = nil, autoPlay: Bool = false) {
         let resume = autoPlay || isPlaying
-        let at = startAt ?? (preserveTime ? currentTime : 0)
+        // Both `startAt` and the preserved playhead are source-timeline times;
+        // convert into the target file's own time.
+        let sourceTime = startAt ?? (preserveTime ? timelinePlayheadTime : 0)
+        let at = source == .result ? sourceTime - resultTimeOffset : sourceTime
 
         Task {
             let item: AVPlayerItem?
@@ -473,10 +656,13 @@ public final class AppModel: ObservableObject {
     }
 
     /// Where to drop the playhead so a render is judged on a moment that
-    /// actually differs: just before the first trigger.
-    public var firstInterestingTime: Double {
-        guard let first = events.map(\.time).min() else { return 0 }
-        return max(0, first - 0.4)
+    /// actually differs: just before the first trigger inside the range
+    /// that was rendered. Source-timeline seconds.
+    public func firstInterestingTime(within range: ClosedRange<Double>?) -> Double {
+        let lo = range?.lowerBound ?? 0
+        let hi = range?.upperBound ?? .infinity
+        guard let first = events.map(\.time).filter({ $0 >= lo && $0 < hi }).min() else { return lo }
+        return max(lo, first - 0.4)
     }
 
     /// The source as you are cutting it: the video's picture, with the override

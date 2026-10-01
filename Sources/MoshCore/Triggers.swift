@@ -1,13 +1,14 @@
 import Foundation
 
 public enum TriggerSource: String, Codable, CaseIterable, Identifiable, Sendable {
-    case audio, midi, manual
+    case audio, midi, sync, manual
 
     public var id: String { rawValue }
     public var displayName: String {
         switch self {
         case .audio: return "Audio in"
         case .midi: return "MIDI in"
+        case .sync: return "Sync"
         case .manual: return "Manual"
         }
     }
@@ -37,6 +38,97 @@ public struct TriggerEvent: Identifiable, Codable, Hashable, Sendable {
         self.source = source
         self.note = note
         self.band = band
+    }
+}
+
+/// A note length on the sync grid, in beats of 4/4.
+public enum NoteValue: String, Codable, CaseIterable, Identifiable, Sendable {
+    case bar, half, quarter, eighth, sixteenth, quarterTriplet, eighthTriplet
+
+    public var id: String { rawValue }
+
+    /// Length in quarter-note beats.
+    public var beats: Double {
+        switch self {
+        case .bar: return 4
+        case .half: return 2
+        case .quarter: return 1
+        case .eighth: return 0.5
+        case .sixteenth: return 0.25
+        case .quarterTriplet: return 2.0 / 3.0
+        case .eighthTriplet: return 1.0 / 3.0
+        }
+    }
+
+    public var displayName: String {
+        switch self {
+        case .bar: return "1 bar"
+        case .half: return "1/2"
+        case .quarter: return "1/4"
+        case .eighth: return "1/8"
+        case .sixteenth: return "1/16"
+        case .quarterTriplet: return "1/4T"
+        case .eighthTriplet: return "1/8T"
+        }
+    }
+}
+
+/// A fixed tempo grid that triggers effects in time with a track.
+public struct SyncSettings: Codable, Hashable, Sendable {
+    public var bpm: Double
+    public var noteValue: NoteValue
+    /// Where beat 1 of bar 1 falls, in seconds. Hits before it are still
+    /// generated, counting backward, so a track with a pickup is covered.
+    public var offset: Double
+    /// Give the first beat of each bar full strength and the rest less, so a
+    /// rule's Velocity knob can make the downbeat hit hardest.
+    public var accentDownbeat: Bool
+
+    public init(bpm: Double = 120, noteValue: NoteValue = .quarter,
+                offset: Double = 0, accentDownbeat: Bool = true) {
+        self.bpm = bpm
+        self.noteValue = noteValue
+        self.offset = offset
+        self.accentDownbeat = accentDownbeat
+    }
+
+    /// Seconds between two hits on the grid.
+    public var interval: Double { 60.0 / max(1, bpm) * noteValue.beats }
+
+    public static let bpmRange: ClosedRange<Double> = 40 ... 300
+}
+
+public enum SyncGrid {
+    /// Every grid hit from 0 to `duration`.
+    ///
+    /// Positions are computed as `offset + n * interval` from an integer n
+    /// rather than by repeatedly adding the interval, so a long clip does not
+    /// accumulate floating-point drift and land its last hits late.
+    public static func events(settings: SyncSettings, duration: Double) -> [TriggerEvent] {
+        let interval = settings.interval
+        guard interval > 0.005, duration > 0 else { return [] }
+
+        let first = Int((-settings.offset / interval).rounded(.up))
+        let last = Int(((duration - settings.offset) / interval).rounded(.down))
+        guard first <= last else { return [] }
+
+        var out: [TriggerEvent] = []
+        out.reserveCapacity(last - first + 1)
+        for n in first ... last {
+            let t = settings.offset + Double(n) * interval
+            guard t >= 0, t < duration else { continue }
+
+            var strength = 1.0
+            if settings.accentDownbeat {
+                // Beats from beat 1, folded into a 4/4 bar.
+                let beatsIn = Double(n) * settings.noteValue.beats
+                let inBar = beatsIn.truncatingRemainder(dividingBy: 4)
+                let wrapped = inBar < 0 ? inBar + 4 : inBar
+                strength = wrapped < 0.001 || wrapped > 3.999 ? 1.0 : 0.55
+            }
+            out.append(TriggerEvent(time: t, strength: strength, source: .sync))
+        }
+        return out
     }
 }
 
@@ -169,15 +261,21 @@ public enum TriggerCompiler {
                 }
 
                 let start = Int(((event.time + rule.offset) * frameRate).rounded())
-                let length = max(1, Int((duration * frameRate).rounded()))
-                guard start < frameCount else { continue }
+                let end = start + max(1, Int((duration * frameRate).rounded()))
+                // Keep only the part of the span that lands inside the clip
+                // being rendered. With an in point set, triggers before it
+                // arrive here with negative times; clamping only the start
+                // to 0 would pile every one of them onto the first frame.
+                let lo = max(0, start)
+                let hi = min(frameCount, end)
+                guard lo < hi else { continue }
 
                 let amount = min(1.0, max(0.0,
                     rule.amountFloor + event.strength * rule.strengthInfluence))
 
                 ops.append(MoshOp(kind: rule.kind,
-                                  startFrame: max(0, start),
-                                  length: min(length, frameCount - max(0, start)),
+                                  startFrame: lo,
+                                  length: hi - lo,
                                   amount: amount,
                                   seed: rng.next()))
             }

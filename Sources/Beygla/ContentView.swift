@@ -69,6 +69,18 @@ struct ContentView: View {
                     LatchButton(label: "Cancel") { model.cancelRender() }
                 }
             } else {
+                // Mix is the one global amount: how much of the mosh shows
+                // over the clean source in what Preview and Render produce.
+                Text("MIX")
+                    .font(Sungam.mono(Sungam.text2xs))
+                    .tracking(Sungam.text2xs * Sungam.scale * 0.08)
+                    .foregroundStyle(Sungam.ink45)
+                Fader(value: $model.mix, color: Sungam.steel, width: 90)
+                Text(String(format: "%.0f%%", model.mix * 100))
+                    .font(Sungam.mono(Sungam.text2xs).monospacedDigit())
+                    .foregroundStyle(model.mix < 0.999 ? Sungam.steel : Sungam.ink62)
+                    .frame(width: 34 * Sungam.scale, alignment: .leading)
+                    .onTapGesture(count: 2) { model.mix = 1 }
                 LatchButton(label: "Preview", enabled: canRender) { render(preview: true) }
                 LatchButton(label: "Render", color: Sungam.steel, filled: canRender,
                             enabled: canRender) { render(preview: false) }
@@ -143,7 +155,7 @@ struct ContentView: View {
             },
             set: { frac in
                 let z = exp(max(0, min(1, frac)) * log(AppModel.maxTimelineZoom))
-                model.setTimelineZoom(z, anchoredAt: model.currentTime)
+                model.setTimelineZoom(z, anchoredAt: model.timelinePlayheadTime)
             }
         )
     }
@@ -168,10 +180,29 @@ struct ContentView: View {
 
             Spacer()
 
-            Text("Pinch to zoom, two fingers to pan")
+            // In and out — steel, the render-chain colour, as on the timeline.
+            Text("RANGE")
                 .font(Sungam.mono(Sungam.text2xs))
-                .foregroundStyle(Sungam.ink38)
+                .tracking(Sungam.text2xs * Sungam.scale * 0.08)
+                .foregroundStyle(Sungam.ink45)
+
+            Text(rangeReadout)
+                .font(Sungam.mono(Sungam.text2xs).monospacedDigit())
+                .foregroundStyle(model.trimRange == nil ? Sungam.ink45 : Sungam.steel)
+
+            LatchButton(label: "In  I", enabled: model.videoURL != nil) { model.setInPoint() }
+            LatchButton(label: "Out  O", enabled: model.videoURL != nil) { model.setOutPoint() }
+            LatchButton(label: "Clear",
+                        enabled: model.inPoint != nil || model.outPoint != nil) {
+                model.clearInOut()
+            }
         }
+    }
+
+    private var rangeReadout: String {
+        guard let r = model.trimRange else { return "whole clip" }
+        return String(format: "%.2f–%.2fs  (%.2fs)", r.lowerBound, r.upperBound,
+                      r.upperBound - r.lowerBound)
     }
 
     private var transport: some View {
@@ -181,7 +212,7 @@ struct ContentView: View {
                         filled: model.isPlaying,
                         enabled: model.videoURL != nil) { model.togglePlay() }
 
-            Text("\(timecode(model.currentTime)) / \(timecode(model.info?.duration ?? 0))")
+            Text("\(timecode(model.timelinePlayheadTime)) / \(timecode(model.info?.duration ?? 0))")
                 .font(Sungam.mono(Sungam.textBase))
                 .foregroundStyle(Sungam.ink85)
 
@@ -230,7 +261,7 @@ struct ContentView: View {
                 LabelValue(label: "Took", value: String(format: "%.1fs", r.duration),
                            color: Sungam.ink62, size: Sungam.textSm)
             } else {
-                Text("Click the waveform to scrub, double-click to place a trigger. Drag across a lane below to set where that effect is live.")
+                Text("Click the waveform to scrub, double-click to place a trigger, drag a lane to set where an effect is live. Pinch to zoom, two fingers to pan. Space plays, I and O set the range.")
                     .font(Sungam.mono(Sungam.textSm))
                     .foregroundStyle(Sungam.ink38)
             }
