@@ -405,9 +405,13 @@ struct Inspector: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
-                ForEach($model.rules) { $rule in
-                    RuleRow(rule: $rule, lastNote: model.midiInput.lastNote?.number) {
-                        model.rules.removeAll { $0.id == rule.id }
+                ForEach(Array($model.rules.enumerated()), id: \.element.id) { i, $rule in
+                    let id = rule.id
+                    RuleRow(rule: $rule, lastNote: model.midiInput.lastNote?.number,
+                            position: i + 1,
+                            onMoveUp: i > 0 ? { model.moveRule(id, by: -1) } : nil,
+                            onMoveDown: i < model.rules.count - 1 ? { model.moveRule(id, by: 1) } : nil) {
+                        model.rules.removeAll { $0.id == id }
                     }
                 }
             }
@@ -438,6 +442,22 @@ struct Inspector: View {
                             .foregroundStyle(Sungam.amber)
                     }
                 } else {
+                    Text("ORDER")
+                        .font(Sungam.mono(Sungam.text2xs))
+                        .tracking(Sungam.text2xs * Sungam.scale * 0.08)
+                        .foregroundStyle(Sungam.ink45)
+                    Selector(options: [(true, "Vectors first"), (false, "Frames first")],
+                             selection: $model.vectorsFirst, color: Sungam.lilacText)
+                    Text(model.vectorsFirst
+                         ? "Vector effects bend the clean picture's motion, then the frame effects rework the result."
+                         : "Frame effects mosh first and are baked into the picture, then the vector effects push that around.")
+                        .font(Sungam.mono(Sungam.text2xs))
+                        .foregroundStyle(Sungam.ink45)
+                        .lineSpacing(3)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    Rectangle().fill(Sungam.ink13).frame(height: Sungam.hairline)
+
                     Text("AVAILABLE")
                         .font(Sungam.mono(Sungam.text2xs))
                         .tracking(Sungam.text2xs * Sungam.scale * 0.08)
@@ -463,9 +483,14 @@ struct Inspector: View {
                             .tracking(Sungam.text2xs * Sungam.scale * 0.08)
                             .foregroundStyle(Sungam.ink45)
 
-                        ForEach($model.vectorRules) { $rule in
-                            VectorRuleRow(rule: $rule, lastNote: model.midiInput.lastNote?.number) {
-                                model.vectorRules.removeAll { $0.id == rule.id }
+                        ForEach(Array($model.vectorRules.enumerated()), id: \.element.id) { i, $rule in
+                            let id = rule.id
+                            VectorRuleRow(rule: $rule, lastNote: model.midiInput.lastNote?.number,
+                                          position: i + 1,
+                                          onMoveUp: i > 0 ? { model.moveVectorRule(id, by: -1) } : nil,
+                                          onMoveDown: i < model.vectorRules.count - 1
+                                            ? { model.moveVectorRule(id, by: 1) } : nil) {
+                                model.vectorRules.removeAll { $0.id == id }
                             }
                         }
                     }
@@ -512,12 +537,20 @@ struct Inspector: View {
 struct RuleRow: View {
     @Binding var rule: MoshRule
     var lastNote: Int?
+    var position: Int = 0
+    var onMoveUp: (() -> Void)? = nil
+    var onMoveDown: (() -> Void)? = nil
     var onDelete: () -> Void
     @State private var expanded = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
+                // Chain position: effects process the frames in this order.
+                Text("\(position)")
+                    .font(Sungam.mono(Sungam.text2xs, weight: .bold).monospacedDigit())
+                    .foregroundStyle(Sungam.ink38)
+                    .frame(width: 12 * Sungam.scale, alignment: .trailing)
                 Lamp(on: rule.enabled, color: rule.kind.signalColor, size: 9)
                     .onTapGesture { rule.enabled.toggle() }
 
@@ -544,6 +577,8 @@ struct RuleRow: View {
                     .font(Sungam.mono(Sungam.text2xs))
                     .foregroundStyle(Sungam.ink62)
 
+                LatchButton(label: "Up", enabled: onMoveUp != nil) { onMoveUp?() }
+                LatchButton(label: "Down", enabled: onMoveDown != nil) { onMoveDown?() }
                 LatchButton(label: expanded ? "Close" : "Edit") { expanded.toggle() }
                 LatchButton(label: "Del", action: onDelete)
             }
@@ -632,12 +667,20 @@ struct RuleRow: View {
 struct VectorRuleRow: View {
     @Binding var rule: VectorRule
     var lastNote: Int?
+    var position: Int = 0
+    var onMoveUp: (() -> Void)? = nil
+    var onMoveDown: (() -> Void)? = nil
     var onDelete: () -> Void
     @State private var expanded = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
+                // Chain position: effects process the frames in this order.
+                Text("\(position)")
+                    .font(Sungam.mono(Sungam.text2xs, weight: .bold).monospacedDigit())
+                    .foregroundStyle(Sungam.ink38)
+                    .frame(width: 12 * Sungam.scale, alignment: .trailing)
                 Lamp(on: rule.enabled, color: rule.kind.signalColor, size: 9)
                     .onTapGesture { rule.enabled.toggle() }
 
@@ -664,6 +707,8 @@ struct VectorRuleRow: View {
                     .font(Sungam.mono(Sungam.text2xs))
                     .foregroundStyle(Sungam.ink62)
 
+                LatchButton(label: "Up", enabled: onMoveUp != nil) { onMoveUp?() }
+                LatchButton(label: "Down", enabled: onMoveDown != nil) { onMoveDown?() }
                 LatchButton(label: expanded ? "Close" : "Edit") { expanded.toggle() }
                 LatchButton(label: "Del", action: onDelete)
             }

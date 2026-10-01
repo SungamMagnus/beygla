@@ -147,6 +147,11 @@ public struct MoshOp: Codable, Identifiable, Hashable, Sendable {
     /// 0...1 — usually trigger velocity or onset strength.
     public var amount: Double
     public var seed: UInt64
+    /// Position of the rule that made this op in its effect chain. Ops are
+    /// applied chain position first, so the order of the effect list is the
+    /// order the effects process the frames in — later ones work on what
+    /// earlier ones produced, like a rack.
+    public var chain: Int = 0
 
     public init(id: UUID = UUID(), kind: MoshOpKind, startFrame: Int, length: Int,
                 amount: Double = 0.7, seed: UInt64 = 0x5EED) {
@@ -192,7 +197,9 @@ public enum MoshEngine {
             }
         }
 
-        for op in ops.sorted(by: { $0.startFrame < $1.startFrame }) {
+        // Chain order first, then time. Sorting by time alone — as this did —
+        // made the order of the effect list meaningless.
+        for op in ops.sorted(by: { ($0.chain, $0.startFrame) < ($1.chain, $1.startFrame) }) {
             let lo = max(settings.protectFirstFrame ? 1 : 0, op.startFrame)
             let hi = min(frames.count, op.endFrame)
             guard lo < hi else { continue }

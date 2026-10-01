@@ -104,6 +104,28 @@ macroblock — not two independent renders' worth: the vector pass runs first,
 its output is remuxed into an AVI losslessly, and the bitstream engine's own
 byte surgery runs on that exactly the way it runs on any other moshable AVI.
 
+### Effect order
+
+The effect list is a chain, the way a rack is: each effect processes the frames
+after the ones above it, so a later effect works on what the earlier ones
+produced. **Up** and **Down** on each row move it; the number on the left is its
+position. Reverse then Stutter is a different picture from Stutter then
+Reverse.
+
+Before this, order meant nothing. Frame effects were applied strictly by time
+whatever the list said, and where two vector effects overlapped the second
+silently replaced the first rather than both running. Now overlapping vector
+effects stack in list order too — Zoom alone and Zoom then Mirror differ, and
+so do Zoom→Mirror and Mirror→Zoom.
+
+The two families can be ordered against each other in the Vector effects
+panel. **Vectors first** (the default) bends the clean picture's motion and the
+frame effects then rework the result. **Frames first** moshes first, bakes that
+into pixels, and the vector effects push the mosh around. Smear still applies
+in both: in frames-first order the vector effects' heal points reset their own
+damage and leave the frame effects' alone, since a keyframe there is a clean
+copy of already-moshed pixels.
+
 ### Where each effect is live
 
 Each effect gets its own lane on the timeline. A lane with nothing painted on
@@ -313,7 +335,8 @@ elsewhere and offers to move them all in one step.
 
 ### In and out
 
-**I** and **O** (or the *In* and *Out* buttons) set the range at the playhead;
+**I** and **O** (or the *In* and *Out* buttons) set the range at the playhead,
+and the IN and OUT flags on the timeline can be dragged to move them;
 *Clear* goes back to the whole clip. Outside the range the timeline washes
 back, and both Preview and Render cover only the range — encoding starts at the
 in point, so a 4-second range on a long file costs 4 seconds of work. Setting In
@@ -452,6 +475,9 @@ beyglactl render clip.mp4 out.mp4 \
     --in 12.0 --out 20.0 --mix 0.6         # a range, at 60% mix
 beyglactl render clip.mp4 out.mp4 \
     --effect bloom --dur 0.4 --smear 0.2   # heal 0.2s after each bloom ends
+beyglactl render clip.mp4 out.mp4 \
+    --chain reverse,stutter \
+    --vector-effect zoom,mirror --frames-first   # chains, frame effects first
 beyglactl list-vector-effects              # print all eleven, with their DMP source
 beyglactl render clip.mp4 out.mp4 \
     --cancel-after 2                       # debug: prove cancelling kills ffmpeg

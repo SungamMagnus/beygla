@@ -248,7 +248,7 @@ public enum TriggerCompiler {
         var ops: [MoshOp] = []
 
         for event in events.sorted(by: { $0.time < $1.time }) {
-            for rule in rules where rule.matches(event) {
+            for (chain, rule) in rules.enumerated() where rule.matches(event) {
                 if rule.probability < 1.0 {
                     let roll = Double(rng.next() % 10_000) / 10_000.0
                     if roll > rule.probability { continue }
@@ -273,11 +273,10 @@ public enum TriggerCompiler {
                 let amount = min(1.0, max(0.0,
                     rule.amountFloor + event.strength * rule.strengthInfluence))
 
-                ops.append(MoshOp(kind: rule.kind,
-                                  startFrame: lo,
-                                  length: hi - lo,
-                                  amount: amount,
-                                  seed: rng.next()))
+                var op = MoshOp(kind: rule.kind, startFrame: lo, length: hi - lo,
+                                amount: amount, seed: rng.next())
+                op.chain = chain
+                ops.append(op)
             }
         }
 

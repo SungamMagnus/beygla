@@ -49,6 +49,8 @@ func usage() -> Never {
           --grid-offset 0.25         where beat 1 falls, in seconds
           --in 2.5 --out 6.5         render only this part of the clip
           --mix 0.6                  how much mosh shows over the clean source
+          --chain reverse,stutter    several frame effects, applied in this order
+          --frames-first             run frame effects before vector effects
           --smear 0.5                heal the picture this long after each effect
                                      ends (default: never)
           --vector-effect KIND       add a vector effect (needs ffgac/ffedit)
@@ -157,6 +159,8 @@ do {
         let outPoint = option("out").flatMap { Double($0) }
         let mix = option("mix").flatMap { Double($0) } ?? 1
         let smear = option("smear").flatMap { Double($0) }
+        let chain = option("chain")?.split(separator: ",").compactMap { MoshOpKind(rawValue: String($0)) }
+        let framesFirst = flag("frames-first")
 
         // The detector listens to whatever will end up on the render.
         let manualTimes = option("at")?
@@ -200,16 +204,19 @@ do {
                 .joined(separator: ", "))
         }
 
-        let rules = [MoshRule(kind: kind, source: ruleSource,
-                              band: ruleSource == .audio ? onsetSettings.band : nil,
-                              duration: duration, activeRegions: regions)]
+        let rules = (chain ?? [kind]).map {
+            MoshRule(kind: $0, source: ruleSource,
+                     band: ruleSource == .audio ? onsetSettings.band : nil,
+                     duration: duration, activeRegions: regions)
+        }
 
         var request = RenderRequest(input: input, output: output, events: events, rules: rules)
         request.audioSource = audioOverride
         request.settings = MoshSettings(purgeAllKeyframes: purge)
 
         if let raw = vectorKindRaw {
-            guard let vKind = VectorOpKind(rawValue: raw) else {
+            let vKinds = raw.split(separator: ",").compactMap { VectorOpKind(rawValue: String($0)) }
+            guard let vKind = vKinds.first, vKinds.count == raw.split(separator: ",").count else {
                 FileHandle.standardError.write(Data(
                     "error: unknown vector effect '\(raw)' — see --list-vector-effects\n".utf8))
                 exit(1)
@@ -219,14 +226,18 @@ do {
                     "error: \(FFglitchError.notInstalled.localizedDescription)\n".utf8))
                 exit(1)
             }
-            request.vectorRules = [VectorRule(kind: vKind, source: ruleSource,
-                                              band: ruleSource == .audio ? onsetSettings.band : nil,
-                                              duration: vectorDuration)]
+            _ = vKind
+            request.vectorRules = vKinds.map {
+                VectorRule(kind: $0, source: ruleSource,
+                           band: ruleSource == .audio ? onsetSettings.band : nil,
+                           duration: vectorDuration)
+            }
         }
         request.quality = quality
         request.previewWidth = width
         request.mix = max(0, min(1, mix))
         request.smear = smear.map { max(0, $0) }
+        request.vectorsFirst = !framesFirst
         if inPoint != nil || outPoint != nil {
             let lo = max(0, inPoint ?? 0)
             let hi = try outPoint ?? tool.probe(input).duration

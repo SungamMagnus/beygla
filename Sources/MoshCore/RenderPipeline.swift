@@ -33,6 +33,11 @@ public struct RenderRequest: Sendable {
     /// means never: the smear runs until something else repaints the frame,
     /// which is how every render behaved before this existed.
     public var smear: Double? = nil
+    /// Which effect family processes the clip first. Vector effects first
+    /// (the default) edit the clean picture's motion and the frame effects
+    /// then rework the result; frame effects first bake their mosh into
+    /// pixels and the vector effects then push that around.
+    public var vectorsFirst: Bool = true
 
     public init(input: URL, output: URL, events: [TriggerEvent], rules: [MoshRule],
                 vectorRules: [VectorRule] = [],
@@ -153,7 +158,10 @@ public final class RenderPipeline: @unchecked Sendable {
         let work = FileManager.default.temporaryDirectory
             .appendingPathComponent("moshbox-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: work, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: work) }
+        // BEYGLA_KEEP_WORK=1 keeps the intermediate files for inspection.
+        let keepWork = ProcessInfo.processInfo.environment["BEYGLA_KEEP_WORK"] != nil
+        if keepWork { FileHandle.standardError.write(Data("work dir: \(work.path)\n".utf8)) }
+        defer { if !keepWork { try? FileManager.default.removeItem(at: work) } }
 
         let rawAVI = work.appendingPathComponent("raw.avi")
         let moshedAVI = work.appendingPathComponent("moshed.avi")
@@ -198,50 +206,49 @@ public final class RenderPipeline: @unchecked Sendable {
             return c
         }
 
-        // 2. Vector pass — rewrites motion vectors inside frames, if any rule
-        // asked for one. Runs before the bitstream pass so both families can
-        // be combined at the cost of exactly one extra encode generation (the
-        // one `ffgac` needs to force a vector onto every macroblock), not two
-        // independent renders' worth.
         let vectorOps = VectorTriggerCompiler.compile(events: shifted, rules: request.vectorRules,
                                                        frameRate: doc.frameRate,
                                                        frameCount: doc.frameCount,
                                                        seed: request.seed)
-        if !vectorOps.isEmpty {
+        if !vectorOps.isEmpty && vectorTool == nil { throw FFglitchError.notInstalled }
+
+        // The vector pass: decode `input` to raw pixels, re-encode with a
+        // vector forced on every macroblock, run the script, wrap the result
+        // back into an AVI. `keyframes` are forced in that re-encode — it is a
+        // fresh encode, so any keyframe not forced here does not exist after.
+        func vectorPass(from input: URL, keyframes: [Double]) throws -> URL {
             guard let vectorTool else { throw FFglitchError.notInstalled }
             progress(.init(stage: .vectorPass, fraction: 0))
-
             let rawYUV = work.appendingPathComponent("vector.yuv")
             let editedStream = work.appendingPathComponent("vector.m4v")
             let vectorAVI = work.appendingPathComponent("vector.avi")
 
-            try tool.decodeToRawYUV(input: rawAVI, output: rawYUV,
-                                    width: doc.width, height: doc.height, token: token)
+            try tool.decodeToRawYUV(input: input, output: rawYUV, width: doc.width,
+                                    height: doc.height, frameRate: doc.frameRate, token: token)
             try checkCancelled()
-
             let script = VectorEngine.generateScript(ops: vectorOps, frameCount: doc.frameCount)
-            // The vector pass re-encodes, so the forced keyframes — trigger
-            // points and heal points — have to be forced again in ffgac, or
-            // they are lost and ffgac's own scene-change detection decides
-            // where the keyframes go instead.
             try vectorTool.moshVectors(rawYUV: rawYUV, width: doc.width, height: doc.height,
                                        frameRate: doc.frameRate, script: script,
                                        quality: request.quality,
-                                       keyframeTimes: opts.keyframeTimes, token: token,
+                                       keyframeTimes: keyframes, token: token,
                                        output: editedStream)
             try checkCancelled()
-
             try tool.remuxToAVI(elementaryStream: editedStream, output: vectorAVI,
                                frameRate: doc.frameRate, token: token)
             try checkCancelled()
-
-            // Re-parse: same frame count, edited payload bytes. The bitstream
-            // pass below (if any) now sees the vector-moshed picture.
-            doc = try AVIDocument(data: try Data(contentsOf: vectorAVI, options: .mappedIfSafe))
             progress(.init(stage: .vectorPass, fraction: 1))
+            return vectorAVI
         }
 
-        // 3. Byte surgery.
+        // 2. Vector effects first: they edit the clean picture's motion, and
+        // the trigger and heal keyframes are forced again in their re-encode
+        // so the frame effects that follow still find them.
+        if request.vectorsFirst && !vectorOps.isEmpty {
+            let v = try vectorPass(from: rawAVI, keyframes: opts.keyframeTimes)
+            doc = try AVIDocument(data: try Data(contentsOf: v, options: .mappedIfSafe))
+        }
+
+        // 3. Frame effects — byte surgery.
         progress(.init(stage: .moshing, fraction: 0))
         let ops = TriggerCompiler.compile(events: shifted, rules: request.rules,
                                           frameRate: doc.frameRate,
@@ -251,6 +258,24 @@ public final class RenderPipeline: @unchecked Sendable {
         let keysAfter = doc.keyframeIndices.count
         try doc.serialize().write(to: moshedAVI)
         progress(.init(stage: .moshing, fraction: 1))
+
+        // 4. Frame effects first: their mosh is baked into pixels and the
+        // vector effects push that around. Only the vector effects' own heal
+        // points are forced here — a keyframe in this encode is a clean copy
+        // of already-moshed pixels, so it resets vector damage and nothing else.
+        var finalAVI = moshedAVI
+        if !request.vectorsFirst && !vectorOps.isEmpty {
+            var heals: [Double] = []
+            if let smear = request.smear {
+                let rate = doc.frameRate
+                let length = Double(doc.frameCount) / rate
+                for op in vectorOps {
+                    let t: Double = Double(op.endFrame) / rate + smear - 0.001
+                    if t > 0.05 && t < length { heals.append(t) }
+                }
+            }
+            finalAVI = try vectorPass(from: moshedAVI, keyframes: heals.sorted())
+        }
         try checkCancelled()
 
         // 3. Decode back, re-attaching the untouched audio — the override when
@@ -271,7 +296,7 @@ public final class RenderPipeline: @unchecked Sendable {
                                    amount: request.mix)
             : nil
 
-        try tool.decodeMoshed(avi: moshedAVI,
+        try tool.decodeMoshed(avi: finalAVI,
                               audioFrom: audio,
                               audioStart: audioStart,
                               output: request.output,

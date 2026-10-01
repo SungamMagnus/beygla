@@ -161,6 +161,40 @@ public final class AppModel: ObservableObject {
         if let i = inPoint, i > t - Self.minTrimLength { inPoint = nil }
     }
 
+    /// Drag the in point, keeping it before Out and inside the clip.
+    public func moveInPoint(to t: Double) {
+        let hi = (outPoint ?? info?.duration ?? t) - Self.minTrimLength
+        inPoint = min(max(0, t), max(0, hi))
+    }
+
+    /// Drag the out point, keeping it after In and inside the clip.
+    public func moveOutPoint(to t: Double) {
+        let lo = (inPoint ?? 0) + Self.minTrimLength
+        outPoint = max(min(info?.duration ?? t, t), lo)
+    }
+
+    // MARK: Effect order
+
+    /// Move an effect up or down its chain. Order is processing order: an
+    /// effect works on what the ones above it produced.
+    public func moveRule(_ id: UUID, by delta: Int) {
+        guard let i = rules.firstIndex(where: { $0.id == id }) else { return }
+        let j = i + delta
+        guard rules.indices.contains(j) else { return }
+        rules.swapAt(i, j)
+    }
+
+    public func moveVectorRule(_ id: UUID, by delta: Int) {
+        guard let i = vectorRules.firstIndex(where: { $0.id == id }) else { return }
+        let j = i + delta
+        guard vectorRules.indices.contains(j) else { return }
+        vectorRules.swapAt(i, j)
+    }
+
+    /// Which family runs first: vector effects on the clean picture, then
+    /// frame effects (true), or frame effects first and vectors after.
+    @Published public var vectorsFirst = true
+
     public func clearInOut() {
         inPoint = nil
         outPoint = nil
@@ -561,6 +595,7 @@ public final class AppModel: ObservableObject {
         request.trim = trim
         request.mix = mix
         request.smear = smear
+        request.vectorsFirst = vectorsFirst
         // A preview trades resolution for turnaround; the mosh itself is
         // identical, so what you see is what the full render will do.
         request.previewWidth = preview ? 640 : nil

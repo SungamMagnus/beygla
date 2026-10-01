@@ -1,3 +1,4 @@
+import AppKit
 import MoshCore
 import SwiftUI
 
@@ -66,6 +67,10 @@ struct TimelineView: View {
 
     /// An in-progress paint, held until the drag ends.
     private enum PaintKind { case bitstream, vector }
+    private enum Marker { case inPoint, outPoint }
+    /// An in or out flag being dragged.
+    @State private var markerDrag: Marker?
+    @State private var hoveringMarker = false
     @State private var paint: (ruleID: UUID, kind: PaintKind, from: Double, to: Double)?
 
     private let waveH: Double = 96
@@ -111,6 +116,7 @@ struct TimelineView: View {
                 }
                 .contentShape(Rectangle())
                 .onTapGesture(count: 2) { p in
+                    if marker(at: p, width: w) != nil { return }
                     let t = time(at: p.x, width: w)
                     if p.y < laneY {
                         model.addManualTrigger(at: t)
@@ -123,6 +129,7 @@ struct TimelineView: View {
                     }
                 }
                 .onTapGesture(count: 1) { p in
+                    if marker(at: p, width: w) != nil { return }
                     if p.y < laneY { model.seek(to: time(at: p.x, width: w)) }
                 }
                 // A click is a zero-distance drag, so a drag that accepts one
@@ -130,6 +137,20 @@ struct TimelineView: View {
                 .simultaneousGesture(
                     DragGesture(minimumDistance: 3)
                         .onChanged { g in
+                            // A drag that starts on a flag moves that flag and
+                            // nothing else — checked before scrub and paint.
+                            if markerDrag == nil, paint == nil,
+                               let m = marker(at: g.startLocation, width: w) {
+                                markerDrag = m
+                            }
+                            if let m = markerDrag {
+                                let t = time(at: g.location.x, width: w)
+                                switch m {
+                                case .inPoint: model.moveInPoint(to: t)
+                                case .outPoint: model.moveOutPoint(to: t)
+                                }
+                                return
+                            }
                             if let p = paint {
                                 paint = (p.ruleID, p.kind, p.from, time(at: g.location.x, width: w))
                             } else if g.startLocation.y < laneY {
@@ -142,6 +163,7 @@ struct TimelineView: View {
                             }
                         }
                         .onEnded { _ in
+                            markerDrag = nil
                             if let p = paint {
                                 switch p.kind {
                                 case .bitstream: model.addRegion(to: p.ruleID, from: p.from, to: p.to)
@@ -151,6 +173,14 @@ struct TimelineView: View {
                             paint = nil
                         }
                 )
+                .onContinuousHover { phase in
+                    let over: Bool
+                    if case .active(let p) = phase { over = marker(at: p, width: w) != nil } else { over = false }
+                    if over != hoveringMarker {
+                        hoveringMarker = over
+                        if over { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
+                    }
+                }
                 .overlay(alignment: .topLeading) { status }
             }
         }
@@ -198,6 +228,22 @@ struct TimelineView: View {
     private func time(at x: CGFloat, width: Double) -> Double {
         let t = visibleStart + Double(x) / max(width, 1) * visibleDuration
         return min(max(0, t), duration)
+    }
+
+    /// The IN and OUT flags are the grab handles — the same rectangles the
+    /// labels are drawn in, with a few points of slack around them.
+    private func marker(at p: CGPoint, width: Double) -> Marker? {
+        guard p.y < 18 else { return nil }
+        let px = Double(p.x)
+        if let t = model.inPoint {
+            let x0 = x(t, width)
+            if px >= x0 - 4 && px <= x0 + 26 { return .inPoint }
+        }
+        if let t = model.outPoint {
+            let x0 = x(t, width)
+            if px >= x0 - 32 && px <= x0 + 4 { return .outPoint }
+        }
+        return nil
     }
 
     private func lane(at y: CGFloat) -> LaneRule? {

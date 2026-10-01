@@ -400,12 +400,18 @@ public final class FFmpegTool: @unchecked Sendable {
     // is part of the regular render path.
 
     /// Decode a video's picture to raw planar YUV420p, ready for `ffgac`.
+    /// The input can be an already-moshed AVI (when frame effects run before
+    /// vector effects), so it is decoded the same tolerant way the final
+    /// output is, and the gaps left by held frames are refilled by the fps
+    /// filter — otherwise every hold would shorten the raw stream and shift
+    /// everything after it.
     public func decodeToRawYUV(input: URL, output: URL, width: Int, height: Int,
-                               token: ProcessToken? = nil) throws {
+                               frameRate: Double, token: ProcessToken? = nil) throws {
         try run(ffmpeg, [
             "-y", "-hide_banner",
+            "-fflags", "+genpts", "-err_detect", "ignore_err",
             "-i", input.path, "-an",
-            "-vf", "scale=\(width):\(height):flags=neighbor",
+            "-vf", "fps=\(frameRate),scale=\(width):\(height):flags=neighbor",
             "-pix_fmt", "yuv420p", "-f", "rawvideo",
             output.path,
         ], token: token)

@@ -185,6 +185,11 @@ public struct VectorOp: Codable, Identifiable, Hashable, Sendable {
     public var length: Int
     public var amount: Double
     public var seed: UInt64
+    /// Position of the rule that made this op in its effect chain. Ops are
+    /// applied chain position first, so the order of the effect list is the
+    /// order the effects process the frames in — later ones work on what
+    /// earlier ones produced, like a rack.
+    public var chain: Int = 0
 
     public init(id: UUID = UUID(), kind: VectorOpKind, startFrame: Int, length: Int,
                 amount: Double = 0.6, seed: UInt64 = 0x5EED) {
@@ -264,7 +269,7 @@ public enum VectorTriggerCompiler {
         var ops: [VectorOp] = []
 
         for event in events.sorted(by: { $0.time < $1.time }) {
-            for rule in rules where rule.matches(event) {
+            for (chain, rule) in rules.enumerated() where rule.matches(event) {
                 if rule.probability < 1.0 {
                     let roll = Double(rng.next() % 10_000) / 10_000.0
                     if roll > rule.probability { continue }
@@ -285,11 +290,10 @@ public enum VectorTriggerCompiler {
                 let amount = min(1.0, max(0.0,
                     rule.amountFloor + event.strength * rule.strengthInfluence))
 
-                ops.append(VectorOp(kind: rule.kind,
-                                    startFrame: lo,
-                                    length: hi - lo,
-                                    amount: amount,
-                                    seed: rng.next()))
+                var op = VectorOp(kind: rule.kind, startFrame: lo, length: hi - lo,
+                                  amount: amount, seed: rng.next())
+                op.chain = chain
+                ops.append(op)
             }
         }
 
