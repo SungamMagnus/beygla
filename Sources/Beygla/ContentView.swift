@@ -115,6 +115,11 @@ struct ContentView: View {
                 PlayerView(player: model.player)
                     .background(Sungam.ink)
 
+                if let frame = model.snapshotFrame {
+                    Image(nsImage: frame).resizable().aspectRatio(contentMode: .fit)
+                        .background(Sungam.ink)
+                }
+
                 if model.videoURL == nil {
                     VStack(spacing: 10) {
                         Wordmark(text: "Drop a video", size: Sungam.textLg, color: Sungam.ink38)

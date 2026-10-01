@@ -65,6 +65,7 @@ struct BeyglaApp: App {
         let args = CommandLine.arguments
         guard let i = args.firstIndex(of: "--open"), i + 1 < args.count else { return }
         model.load(url: URL(fileURLWithPath: args[i + 1]))
+        Snapshot.runIfRequested(model)
     }
 
     private func openVideo() {

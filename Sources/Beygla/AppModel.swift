@@ -230,6 +230,10 @@ public final class AppModel: ObservableObject {
     /// How much of the moshed picture shows over the clean source, 0...1.
     @Published public var mix: Double = 1
 
+    /// Only set by `--snapshot`: a decoded frame shown over the player,
+    /// because a video layer does not draw into a self-capture.
+    @Published public var snapshotFrame: NSImage?
+
     // MARK: Smear
 
     /// Seconds the damage lingers after an effect ends before a clean

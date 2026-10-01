@@ -7,6 +7,8 @@ drag them.
 Inspired by [supermosh](https://github.com/supermosh/supermosh.github.io) and
 [Datamosher Pro](https://github.com/Akascape/Datamosher-Pro).
 
+![Beygla: a moshed preview, the trigger and effect panels, and the timeline with per-effect lanes and in/out points](docs/screenshot.png)
+
 ---
 
 ## What it does
