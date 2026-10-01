@@ -232,10 +232,19 @@ struct ContentView: View {
 
     private var transport: some View {
         HStack(spacing: 10) {
-            LatchButton(label: model.isPlaying ? "Stop" : "Play",
-                        color: Sungam.coral,
-                        filled: model.isPlaying,
-                        enabled: model.videoURL != nil) { model.togglePlay() }
+            if model.isPlaying {
+                LatchButton(label: "Stop", color: Sungam.coral, filled: true) {
+                    model.stopPlayback()
+                }
+            } else {
+                LatchButton(label: "Play from start", color: Sungam.coral,
+                            enabled: model.videoURL != nil) { model.playFromStart() }
+                // Steel, like the range itself: plays In to Out and stops.
+                LatchButton(label: "Play from In", color: Sungam.steel,
+                            enabled: model.inPoint != nil || model.outPoint != nil) {
+                    model.playFromIn()
+                }
+            }
 
             Text("\(timecode(model.timelinePlayheadTime)) / \(timecode(model.info?.duration ?? 0))")
                 .font(Sungam.mono(Sungam.textBase))
@@ -286,7 +295,7 @@ struct ContentView: View {
                 LabelValue(label: "Took", value: String(format: "%.1fs", r.duration),
                            color: Sungam.ink62, size: Sungam.textSm)
             } else {
-                Text("Click the waveform to scrub, double-click to place a trigger, drag a lane to set where an effect is live. Pinch to zoom, two fingers to pan. Space plays, I and O set the range.")
+                Text("Click the waveform to scrub, double-click to place a trigger, drag a lane to set where an effect is live. Pinch to zoom, two fingers to pan. Space pauses and resumes, I and O set the range.")
                     .font(Sungam.mono(Sungam.textSm))
                     .foregroundStyle(Sungam.ink38)
             }

@@ -333,6 +333,12 @@ listening to the source it was set to, so grid-driven and audio-driven effects
 can run in the same render. The source panel says when effects are listening
 elsewhere and offers to move them all in one step.
 
+### Playing
+
+**Play from start** plays the clip from the beginning. **Play from In** plays
+the range — from the in point, stopping at the out point. Space pauses and
+resumes from wherever the playhead is.
+
 ### In and out
 
 **I** and **O** (or the *In* and *Out* buttons) set the range at the playhead,
@@ -386,8 +392,12 @@ effect has corrupted the picture, every following delta frame keeps building
 on the corrupted pixels until a keyframe repaints them. Beygla puts keyframes
 only where it is told to, so until now a smear lasted until the content
 happened to repaint itself — a scene cut, a large movement — rather than for
-any time you chose. That also meant Bloom's Length knob did nothing: Bloom at
-0.1 s and at 1.0 s rendered byte-identical output.
+any time you chose. That also meant Bloom's Length knob usually did nothing: Bloom at
+0.1 s and at 1.0 s rendered byte-identical output. (Usually, not always —
+Bloom strips every keyframe in its span, so a span long enough to reach the
+keyframe a following trigger forces swallows that one too and keeps smearing.
+Where neither that nor Smear applies, a Bloom row hides its Jitter knob and
+says why.)
 
 With Smear set, a clean keyframe is forced into the encode that long after
 every effect ends. The engine never strips a keyframe outside an effect's own

@@ -535,6 +535,7 @@ struct Inspector: View {
 /// One effect rule. Collapsed it reads as a lamp, a name and a duration; open
 /// it exposes the knobs. Modulation parameters are violet, and only those.
 struct RuleRow: View {
+    @EnvironmentObject var model: AppModel
     @Binding var rule: MoshRule
     var lastNote: Int?
     var position: Int = 0
@@ -542,6 +543,12 @@ struct RuleRow: View {
     var onMoveDown: (() -> Void)? = nil
     var onDelete: () -> Void
     @State private var expanded = false
+
+    /// Jitter varies span length, which every effect but Bloom acts on
+    /// directly; for Bloom it depends on Smear and trigger spacing.
+    private var jitterMatters: Bool {
+        rule.kind != .bloom || model.bloomLengthMatters(rule)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -637,6 +644,14 @@ struct RuleRow: View {
                     Spacer()
                 }
 
+                if !jitterMatters {
+                    Text("Length and Jitter don't change a Bloom here: it strips its own keyframe whatever its length. They start to matter once Smear is set, or when a span reaches the next trigger.")
+                        .font(Sungam.mono(Sungam.text2xs))
+                        .foregroundStyle(Sungam.ink45)
+                        .lineSpacing(3)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
                 // Modulation — violet, and nothing else on the panel is violet.
                 HStack(spacing: 10) {
                     Knob(label: "Velocity", value: $rule.strengthInfluence,
@@ -645,9 +660,11 @@ struct RuleRow: View {
                     Knob(label: "Chance", value: $rule.probability,
                          radius: 13, color: Sungam.violet,
                          format: { String(format: "%.2f", $0) })
-                    Knob(label: "Jitter", value: $rule.durationJitter,
-                         radius: 13, color: Sungam.violet,
-                         format: { String(format: "%.2f", $0) })
+                    if jitterMatters {
+                        Knob(label: "Jitter", value: $rule.durationJitter,
+                             radius: 13, color: Sungam.violet,
+                             format: { String(format: "%.2f", $0) })
+                    }
                     Knob(label: "Offset", value: $rule.offset, range: -0.3 ... 0.3,
                          radius: 13, color: Sungam.violet, bipolar: true,
                          format: { String(format: "%+.0fms", $0 * 1000) })

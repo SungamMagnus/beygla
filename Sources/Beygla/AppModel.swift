@@ -173,6 +173,23 @@ public final class AppModel: ObservableObject {
         outPoint = max(min(info?.duration ?? t, t), lo)
     }
 
+    /// Whether a Bloom rule's span length can change the render. Bloom only
+    /// strips keyframes inside its span; the one at its own trigger goes
+    /// whatever the length, so length — and with it Jitter — matters only if
+    /// Smear sets a heal point after the span, or the span (at its longest,
+    /// with full Jitter doubling it) can reach the keyframe another trigger
+    /// forces.
+    public func bloomLengthMatters(_ rule: MoshRule) -> Bool {
+        if smear != nil { return true }
+        let reach = rule.duration * 2 + max(0, rule.offset)
+        let times = events.map(\.time).sorted()
+        for e in events where rule.matches(e) {
+            let start = e.time + rule.offset
+            if times.contains(where: { $0 > start + 0.001 && $0 < start + reach }) { return true }
+        }
+        return false
+    }
+
     // MARK: Effect order
 
     /// Move an effect up or down its chain. Order is processing order: an
@@ -364,6 +381,11 @@ public final class AppModel: ObservableObject {
                 guard let self else { return }
                 self.currentTime = time.seconds
                 self.isPlaying = self.player.rate != 0
+                if let stop = self.playUntil, self.timelinePlayheadTime >= stop {
+                    self.player.pause()
+                    self.seek(to: stop)
+                    self.playUntil = nil
+                }
             }
         }
     }
@@ -543,6 +565,7 @@ public final class AppModel: ObservableObject {
     // MARK: - Transport
 
     public func togglePlay() {
+        playUntil = nil
         if player.rate == 0 {
             // The loaded file's own length, which for a trimmed result is
             // shorter than the source's.
@@ -552,6 +575,29 @@ public final class AppModel: ObservableObject {
         } else {
             player.pause()
         }
+    }
+
+    /// When set, playback stops on reaching this source time — used by
+    /// "From In" so the range plays in to out and stops.
+    private var playUntil: Double?
+
+    public func playFromStart() {
+        playUntil = nil
+        seek(to: 0)
+        player.play()
+    }
+
+    /// Play the range: from the in point, stopping at the out point if one
+    /// is set. With only Out set, plays from the start of the clip to it.
+    public func playFromIn() {
+        playUntil = outPoint
+        seek(to: inPoint ?? 0)
+        player.play()
+    }
+
+    public func stopPlayback() {
+        playUntil = nil
+        player.pause()
     }
 
     /// Where the playhead is on the *source*. A trimmed result file starts at
