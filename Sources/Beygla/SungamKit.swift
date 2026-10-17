@@ -17,8 +17,16 @@ enum Sungam {
 
     // MARK: Base
 
-    static let paper = Color(red: 0.941, green: 0.925, blue: 0.886)   // #f0ece2
-    static let ink = Color(red: 0.102, green: 0.102, blue: 0.090)     // #1a1a17
+    // The graphite edition: paper and ink trade places, so every rule written
+    // in terms of them — hairlines at partial ink, fills on paper — still
+    // holds. A light chrome glares next to the picture and skews how the mosh
+    // reads; a mid-dark grey keeps out of its way without going to black.
+    static let paper = Color(red: 0.180, green: 0.176, blue: 0.169)   // #2e2d2b
+    static let ink = Color(red: 0.925, green: 0.910, blue: 0.875)     // #ece8df
+
+    /// Behind the picture only: a step darker than the panels, so the video's
+    /// frame is its own edge rather than a border drawn around it.
+    static let stage = Color(red: 0.125, green: 0.122, blue: 0.118)   // #201f1e
 
     static func ink(_ alpha: Double) -> Color { ink.opacity(alpha) }
 
@@ -41,11 +49,13 @@ enum Sungam {
 
     static let coral = Color(red: 0.929, green: 0.506, blue: 0.349)   // #ed8159
     static let teal = Color(red: 0.322, green: 0.690, blue: 0.643)    // #52b0a4
-    static let steel = Color(red: 0.310, green: 0.494, blue: 0.659)   // #4f7ea8
-    static let violet = Color(red: 0.420, green: 0.357, blue: 0.769)  // #6b5bc4
-    static let amber = Color(red: 0.753, green: 0.553, blue: 0.086)   // #c08d16
+    // Steel, violet and the lilac text are lifted a step from the light
+    // edition: at their old values they sank into the dark paper.
+    static let steel = Color(red: 0.400, green: 0.584, blue: 0.761)   // #6695c2
+    static let violet = Color(red: 0.549, green: 0.490, blue: 0.878)  // #8c7de0
+    static let amber = Color(red: 0.851, green: 0.639, blue: 0.161)   // #d9a329
     static let lilac = Color(red: 0.827, green: 0.655, blue: 0.863)   // #d3a7dc
-    static let lilacText = Color(red: 0.604, green: 0.388, blue: 0.671)
+    static let lilacText = Color(red: 0.741, green: 0.553, blue: 0.808)  // #bd8dce
 
     // MARK: Type
     //
@@ -72,10 +82,6 @@ enum Sungam {
     static let hairline: CGFloat = 1
     static let borderDefault: CGFloat = 1.2
     static let borderStrong: CGFloat = 1.4
-
-    /// 317.2° of pot travel, leaving a gap at the bottom where the pointer
-    /// never goes. Half-sweep, in radians.
-    static let knobHalfSweep = 158.6 * .pi / 180.0
 }
 
 // MARK: - Wordmark
@@ -128,21 +134,34 @@ struct PanelFrame<Content: View>: View {
     }
 }
 
-// MARK: - Knob
+// MARK: - NumBox
 
-/// One circle, one arc, one pointer. Unipolar knobs grow the arc from the
-/// anticlockwise stop, bipolar ones from noon. Drag vertically to turn it;
-/// hold shift for a finer drag.
-struct Knob: View {
+/// A number in a box — the system's compact value control, standing in for
+/// the rotary knob wherever space matters (which, in an inspector, is
+/// everywhere). A faint fill behind the digits shows where the value sits in
+/// its range, growing from the left, or from the centre when bipolar.
+///
+/// Drag up or down to change it, shift for a finer drag. Double-click to type
+/// a value, in the units the box displays (`entryScale` converts: a box that
+/// shows milliseconds of a value held in seconds passes 1000).
+struct NumBox: View {
     let label: String
     @Binding var value: Double
     var range: ClosedRange<Double> = 0 ... 1
-    var radius: CGFloat = 20
     var color: Color = Sungam.coral
     var bipolar: Bool = false
+    var entryScale: Double = 1
+    /// Drags snap to this step; typed values do not, so a tempo can drag in
+    /// whole BPM and still take 127.5 from the keyboard.
+    var dragStep: Double? = nil
+    /// Label beside the box instead of above it, for a single-row strip.
+    var inline: Bool = false
     var format: (Double) -> String = { String(format: "%.2f", $0) }
 
     @State private var dragStart: Double?
+    @State private var editing = false
+    @State private var text = ""
+    @FocusState private var focused: Bool
 
     private var norm: Double {
         let span = range.upperBound - range.lowerBound
@@ -150,84 +169,100 @@ struct Knob: View {
         return min(max((value - range.lowerBound) / span, 0), 1)
     }
 
-    private var r: CGFloat { radius * Sungam.scale }
-    private var labelSize: CGFloat { radius >= 30 ? 10 : radius >= 18 ? 9 : 8 }
-
     var body: some View {
-        VStack(spacing: 2) {
-            Text(label.uppercased())
-                .font(Sungam.mono(labelSize))
-                .tracking(labelSize * Sungam.scale * 0.02)
-                .foregroundStyle(Sungam.ink62)
-            Text(format(value))
-                .font(Sungam.mono(labelSize + 2, weight: .bold))
-                .foregroundStyle(color)
-
-            Canvas { ctx, size in draw(ctx, size: size) }
-                .frame(width: r * 2 + 18, height: r * 2 + 18)
-                .contentShape(Rectangle())
-                .gesture(
-                    DragGesture(minimumDistance: 0)
-                        .onChanged { g in
-                            let fine = NSEvent.modifierFlags.contains(.shift)
-                            turn(g, gain: fine ? 0.0012 : 0.006)
-                        }
-                        .onEnded { _ in dragStart = nil }
-                )
+        if inline {
+            HStack(spacing: 6) {
+                caption.fixedSize()
+                box.frame(width: 62 * Sungam.scale)
+            }
+        } else {
+            VStack(alignment: .leading, spacing: 3) {
+                caption
+                box
+            }
+            .frame(minWidth: 54 * Sungam.scale, maxWidth: .infinity, alignment: .leading)
         }
     }
 
-    private func turn(_ g: DragGesture.Value, gain: Double) {
-        let base = dragStart ?? norm
-        if dragStart == nil { dragStart = norm }
-        let next = min(max(base - Double(g.translation.height) * gain, 0), 1)
-        value = range.lowerBound + next * (range.upperBound - range.lowerBound)
+    private var caption: some View {
+        Text(label.uppercased())
+            .font(Sungam.mono(Sungam.text2xs))
+            .tracking(Sungam.text2xs * Sungam.scale * 0.06)
+            .foregroundStyle(Sungam.ink55)
+            .lineLimit(1)
     }
 
-    private func angle(_ n: Double) -> Double {
-        -Sungam.knobHalfSweep + 2 * Sungam.knobHalfSweep * min(max(n, 0), 1) - .pi / 2
+    private var box: some View {
+        GeometryReader { geo in
+            ZStack(alignment: .leading) {
+                fill(width: geo.size.width)
+                if editing {
+                    TextField("", text: $text)
+                        .textFieldStyle(.plain)
+                        .font(Sungam.mono(Sungam.textBase, weight: .bold))
+                        .foregroundStyle(Sungam.ink)
+                        .padding(.horizontal, 6)
+                        .focused($focused)
+                        .onSubmit(commit)
+                        .onExitCommand { editing = false }
+                        .onChange(of: focused) { _, f in if !f && editing { commit() } }
+                } else {
+                    Text(format(value))
+                        .font(Sungam.mono(Sungam.textBase, weight: .bold).monospacedDigit())
+                        .foregroundStyle(color)
+                        .lineLimit(1)
+                        .padding(.horizontal, 6)
+                }
+            }
+            .frame(width: geo.size.width, height: geo.size.height, alignment: .leading)
+        }
+        .frame(height: 19 * Sungam.scale)
+        .background(Sungam.ink(0.04))
+        .overlay(Rectangle().stroke(editing ? color : Sungam.ink22, lineWidth: Sungam.hairline))
+        .contentShape(Rectangle())
+        .gesture(
+            DragGesture(minimumDistance: 2)
+                .onChanged { g in
+                    guard !editing else { return }
+                    let fine = NSEvent.modifierFlags.contains(.shift)
+                    let base = dragStart ?? norm
+                    if dragStart == nil { dragStart = norm }
+                    let gain = fine ? 0.001 : 0.005
+                    let next = min(max(base - Double(g.translation.height) * gain, 0), 1)
+                    var v = range.lowerBound + next * (range.upperBound - range.lowerBound)
+                    if let step = dragStep { v = (v / step).rounded() * step }
+                    value = v
+                }
+                .onEnded { _ in dragStart = nil }
+        )
+        .simultaneousGesture(TapGesture(count: 2).onEnded {
+            text = String(format: "%g", (value * entryScale * 1000).rounded() / 1000)
+            editing = true
+            focused = true
+        })
+        .help("Drag up/down to change, shift for fine, double-click to type")
     }
 
-    private func draw(_ ctx: GraphicsContext, size: CGSize) {
-        let c = CGPoint(x: size.width / 2, y: size.height / 2)
-        let aStart = angle(0), aEnd = angle(1), aNow = angle(norm)
-        let track = r + 4.5
-        let w: CGFloat = radius >= 24 ? 3.4 : radius >= 16 ? 2.8 : 2.2
-
-        // Body
-        let body = Path(ellipseIn: CGRect(x: c.x - r, y: c.y - r, width: r * 2, height: r * 2))
-        ctx.fill(body, with: .color(Sungam.paper))
-        ctx.stroke(body, with: .color(Sungam.ink38), lineWidth: Sungam.borderDefault)
-
-        // Unlit track, then the lit arc
-        ctx.stroke(arc(c, track, aStart, aEnd), with: .color(Sungam.ink13), lineWidth: w)
-        let from = bipolar ? -Double.pi / 2 : aStart
-        ctx.stroke(arc(c, track, from, aNow), with: .color(color), lineWidth: w)
-
-        // Pointer
-        var pointer = Path()
-        pointer.move(to: point(c, r * 0.16, aNow))
-        pointer.addLine(to: point(c, r * 0.78, aNow))
-        ctx.stroke(pointer, with: .color(Sungam.ink85), lineWidth: radius >= 24 ? 2 : 1.5)
-
-        // The tick at the anticlockwise stop
-        var tick = Path()
-        tick.move(to: point(c, r + 1.5, aStart))
-        tick.addLine(to: point(c, r + 6.5, aStart))
-        ctx.stroke(tick, with: .color(Sungam.ink28), lineWidth: 1)
+    @ViewBuilder
+    private func fill(width: CGFloat) -> some View {
+        if bipolar {
+            let mid = width / 2
+            let x = width * norm
+            Rectangle().fill(color.opacity(0.22))
+                .frame(width: abs(x - mid))
+                .offset(x: min(x, mid))
+            Rectangle().fill(Sungam.ink22).frame(width: 1).offset(x: mid)
+        } else {
+            Rectangle().fill(color.opacity(0.22)).frame(width: width * norm)
+        }
     }
 
-    private func point(_ c: CGPoint, _ radius: CGFloat, _ a: Double) -> CGPoint {
-        CGPoint(x: c.x + radius * CGFloat(cos(a)), y: c.y + radius * CGFloat(sin(a)))
-    }
-
-    private func arc(_ c: CGPoint, _ radius: CGFloat, _ a: Double, _ b: Double) -> Path {
-        var p = Path()
-        guard abs(b - a) > 1e-4 else { return p }
-        p.addArc(center: c, radius: radius,
-                 startAngle: .radians(min(a, b)), endAngle: .radians(max(a, b)),
-                 clockwise: false)
-        return p
+    private func commit() {
+        let cleaned = text.filter { "0123456789.-+".contains($0) }
+        if let v = Double(cleaned) {
+            value = min(max(v / entryScale, range.lowerBound), range.upperBound)
+        }
+        editing = false
     }
 }
 
@@ -280,6 +315,56 @@ struct LatchButton: View {
             .onTapGesture { if enabled { action() } }
             .opacity(enabled ? 1 : 0.6)
     }
+}
+
+// MARK: - DropdownLatch
+
+/// A Selector folded into one filled latch: it shows the current position,
+/// and a click opens a plain menu of all of them. For a choice made rarely
+/// enough that it should not spend a whole row of the panel. Drawn by hand
+/// rather than with SwiftUI's `Menu`, which styles its label its own way.
+struct DropdownLatch<T: Hashable>: View {
+    let label: String
+    var color: Color = Sungam.coral
+    let options: [(value: T, label: String)]
+    let selection: T
+    let choose: (T) -> Void
+
+    var body: some View {
+        Text("\(label.uppercased())  ▾")
+            .font(Sungam.mono(Sungam.textXs))
+            .tracking(Sungam.textXs * Sungam.scale * 0.02)
+            .foregroundStyle(Sungam.paper)
+            .padding(.horizontal, 10)
+            .frame(height: 17 * Sungam.scale)
+            .background(color)
+            .contentShape(Rectangle())
+            .onTapGesture { popUp() }
+    }
+
+    private func popUp() {
+        let menu = NSMenu()
+        for opt in options {
+            let item = ClosureMenuItem(title: opt.label) { choose(opt.value) }
+            item.state = opt.value == selection ? .on : .off
+            menu.addItem(item)
+        }
+        menu.popUp(positioning: nil, at: NSEvent.mouseLocation, in: nil)
+    }
+}
+
+private final class ClosureMenuItem: NSMenuItem {
+    private let handler: () -> Void
+
+    init(title: String, handler: @escaping () -> Void) {
+        self.handler = handler
+        super.init(title: title, action: #selector(fire), keyEquivalent: "")
+        target = self
+    }
+
+    required init(coder: NSCoder) { fatalError("not used") }
+
+    @objc private func fire() { handler() }
 }
 
 // MARK: - Selector
@@ -382,7 +467,7 @@ struct SegmentMeter: View {
 // MARK: - Fader
 
 /// A flat track with a small handle — the system's linear control, next to
-/// the Knob's rotary one. The tokens describe it vertical (`--fader-travel`
+/// the NumBox's stepped one. The tokens describe it vertical (`--fader-travel`
 /// is a throw in px, sized for a mixer-style channel strip); this is the
 /// horizontal adaptation, which suits a control paired with a horizontal
 /// timeline better than a rotary one would. The handle is one of exactly two

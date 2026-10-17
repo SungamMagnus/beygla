@@ -14,7 +14,7 @@ struct ContentView: View {
             HStack(spacing: 0) {
                 stage
                 Rectangle().fill(Sungam.ink18).frame(width: Sungam.hairline)
-                Inspector().frame(width: 460)
+                Inspector().frame(width: 420)
             }
         }
         .background(Sungam.paper)
@@ -40,20 +40,31 @@ struct ContentView: View {
 
     private var header: some View {
         HStack(spacing: 14) {
-            Wordmark(text: "Beygla", size: Sungam.textXl, color: Sungam.ink)
+            Wordmark(text: "Beygla", size: Sungam.textLg, color: Sungam.ink85)
 
-            LatchButton(label: "Open") { openVideo() }
+            // The material, then what listens to it: video, audio, trigger
+            // source — the three choices everything else hangs off.
+            HeaderSlot(label: "Video") {
+                LatchButton(label: model.videoURL?.lastPathComponent ?? "Open…") { openVideo() }
+                    .help(model.info.map { i in
+                        "\(i.width)×\(i.height)  \(String(format: "%.3f", i.frameRate)) fps  \(String(format: "%.2f", i.duration))s"
+                    } ?? "Open a video")
+            }
 
-            if let url = model.videoURL {
-                Text(url.lastPathComponent)
-                    .font(Sungam.mono(Sungam.textBase))
-                    .foregroundStyle(Sungam.ink62)
-                    .lineLimit(1)
-                if let i = model.info {
-                    Text("\(i.width)×\(i.height)  \(String(format: "%.3f", i.frameRate)) FPS  \(String(format: "%.2f", i.duration))S")
-                        .font(Sungam.mono(Sungam.textSm))
-                        .foregroundStyle(Sungam.ink38)
+            HeaderSlot(label: "Audio") {
+                LatchButton(label: model.audioURL?.lastPathComponent ?? "From video") { openAudio() }
+                    .help(model.audioURL == nil
+                          ? "Load a separate track to drive detection, play against the picture and mux into the render"
+                          : "Overrides the video's own track")
+                if model.audioURL != nil {
+                    LatchButton(label: "×") { model.loadAudio(url: nil) }
                 }
+            }
+
+            HeaderSlot(label: "Trigger") {
+                DropdownLatch(label: model.triggerSource.displayName, color: Sungam.coral,
+                              options: TriggerSource.allCases.map { ($0, $0.displayName) },
+                              selection: model.triggerSource) { model.triggerSource = $0 }
             }
 
             Spacer()
@@ -99,7 +110,7 @@ struct ContentView: View {
             }
         }
         .padding(.horizontal, 16)
-        .padding(.vertical, 12)
+        .padding(.vertical, 10)
         .background(Sungam.paper)
     }
 
@@ -110,14 +121,15 @@ struct ContentView: View {
     // MARK: Stage
 
     private var stage: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: 0) {
             ZStack {
+                Sungam.stage
                 PlayerView(player: model.player)
-                    .background(Sungam.ink)
+                    .padding(12)
 
                 if let frame = model.snapshotFrame {
                     Image(nsImage: frame).resizable().aspectRatio(contentMode: .fit)
-                        .background(Sungam.ink)
+                        .padding(12)
                 }
 
                 if model.videoURL == nil {
@@ -143,20 +155,28 @@ struct ContentView: View {
                         }
                         .padding(.horizontal, 10)
                         .padding(.vertical, 6)
-                        .background(Sungam.paper)
+                        .background(Sungam.stage.opacity(0.8))
                         .padding(10)
                         Spacer()
                     }
                 }
             }
-            .overlay(Rectangle().stroke(Sungam.ink28, lineWidth: Sungam.hairline))
 
-            transport
-            timelineZoomRow
-            TimelineView()
-            readout
+            Rectangle().fill(Sungam.ink13).frame(height: Sungam.hairline)
+
+            // Everything below the picture: one transport row, the timeline,
+            // and a quiet footer that only says what is useful right now.
+            VStack(spacing: 10) {
+                transport
+                TriggerBar()
+                TimelineView()
+                timelineZoomRow
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 12)
+            .padding(.bottom, 12)
+            .background(Sungam.paper)
         }
-        .padding(16)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
@@ -204,9 +224,13 @@ struct ContentView: View {
                 .foregroundStyle(Sungam.ink62)
                 .frame(width: 36 * Sungam.scale, alignment: .leading)
 
-            LatchButton(label: "Reset", enabled: model.timelineZoom > 1.001) {
-                model.resetTimelineZoom()
+            if model.timelineZoom > 1.001 {
+                LatchButton(label: "Reset") { model.resetTimelineZoom() }
             }
+
+            Spacer()
+
+            readout
 
             Spacer()
 
@@ -222,9 +246,8 @@ struct ContentView: View {
 
             LatchButton(label: "In  I", enabled: model.videoURL != nil) { model.setInPoint() }
             LatchButton(label: "Out  O", enabled: model.videoURL != nil) { model.setOutPoint() }
-            LatchButton(label: "Clear",
-                        enabled: model.inPoint != nil || model.outPoint != nil) {
-                model.clearInOut()
+            if model.inPoint != nil || model.outPoint != nil {
+                LatchButton(label: "×") { model.clearInOut() }
             }
         }
     }
@@ -242,17 +265,17 @@ struct ContentView: View {
                     model.stopPlayback()
                 }
             } else {
-                LatchButton(label: "Play from start", color: Sungam.coral,
+                LatchButton(label: "Play", color: Sungam.coral, filled: model.videoURL != nil,
                             enabled: model.videoURL != nil) { model.playFromStart() }
                 // Steel, like the range itself: plays In to Out and stops.
-                LatchButton(label: "Play from In", color: Sungam.steel,
-                            enabled: model.inPoint != nil || model.outPoint != nil) {
-                    model.playFromIn()
+                // Only offered once there is a range to play.
+                if model.inPoint != nil || model.outPoint != nil {
+                    LatchButton(label: "Play range", color: Sungam.steel) { model.playFromIn() }
                 }
             }
 
             Text("\(timecode(model.timelinePlayheadTime)) / \(timecode(model.info?.duration ?? 0))")
-                .font(Sungam.mono(Sungam.textBase))
+                .font(Sungam.mono(Sungam.textBase).monospacedDigit())
                 .foregroundStyle(Sungam.ink85)
 
             Rectangle().fill(Sungam.ink18)
@@ -268,46 +291,43 @@ struct ContentView: View {
                                                 : model.previewURL != nil })
                 .frame(width: 150)
 
-            Text(model.playbackName)
-                .font(Sungam.mono(Sungam.text2xs))
-                .foregroundStyle(model.playbackSource == .result ? Sungam.steel : Sungam.ink45)
-                .lineLimit(1).truncationMode(.middle)
-                .frame(maxWidth: 180, alignment: .leading)
-
-            LatchButton(label: "Reveal", enabled: model.previewURL != nil) {
-                if let u = model.previewURL { NSWorkspace.shared.activateFileViewerSelecting([u]) }
+            if let u = model.previewURL, model.playbackSource == .result {
+                LatchButton(label: "Reveal") { NSWorkspace.shared.activateFileViewerSelecting([u]) }
             }
 
             Spacer()
 
             LabelValue(label: "Triggers", value: "\(model.events.count)",
                        color: model.events.isEmpty ? Sungam.ink38 : Sungam.coral)
-            LatchButton(label: "Clear", enabled: !model.events.isEmpty) { model.clearTriggers() }
+            if !model.events.isEmpty {
+                LatchButton(label: "×") { model.clearTriggers() }
+            }
         }
     }
 
     /// The render's measured result, stated as numbers rather than a checkmark.
     private var readout: some View {
-        HStack(spacing: 16) {
+        HStack(spacing: 14) {
             if let r = model.lastReport {
                 LabelValue(label: "Frames", value: "\(r.frameCount)", color: Sungam.steel,
-                           size: Sungam.textSm)
+                           size: Sungam.text2xs)
                 LabelValue(label: "Ops", value: "\(r.opCount)", color: Sungam.teal,
-                           size: Sungam.textSm)
+                           size: Sungam.text2xs)
                 LabelValue(label: "Keyframes",
                            value: "\(r.keyframesBefore)→\(r.keyframesAfter)",
-                           color: Sungam.coral, size: Sungam.textSm)
+                           color: Sungam.coral, size: Sungam.text2xs)
                 LabelValue(label: "Took", value: String(format: "%.1fs", r.duration),
-                           color: Sungam.ink62, size: Sungam.textSm)
+                           color: Sungam.ink62, size: Sungam.text2xs)
             } else {
-                Text("Click the waveform to scrub, double-click to place a trigger, drag a lane to set where an effect is live. Pinch to zoom, two fingers to pan. Space pauses and resumes, I and O set the range.")
-                    .font(Sungam.mono(Sungam.textSm))
+                Text("Double-click to add a trigger · drag a lane to paint · pinch to zoom")
+                    .font(Sungam.mono(Sungam.text2xs))
                     .foregroundStyle(Sungam.ink38)
+                    .lineLimit(1)
             }
             if let e = model.playbackError {
                 Text(e).font(Sungam.mono(Sungam.textSm)).foregroundStyle(Sungam.amber)
+                    .lineLimit(1)
             }
-            Spacer()
         }
     }
 
@@ -318,6 +338,13 @@ struct ContentView: View {
     }
 
     // MARK: Actions
+
+    private func openAudio() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.audio, .mp3, .wav, .aiff, .mpeg4Audio]
+        panel.allowsMultipleSelection = false
+        if panel.runModal() == .OK, let url = panel.url { model.loadAudio(url: url) }
+    }
 
     private func openVideo() {
         let panel = NSOpenPanel()
@@ -339,6 +366,23 @@ struct ContentView: View {
         panel.nameFieldStringValue = src.deletingPathExtension().lastPathComponent + "-beygla.mp4"
         if panel.runModal() == .OK, let out = panel.url {
             model.render(to: out, preview: false)
+        }
+    }
+}
+
+/// A small caption sitting before its control in the header, so the row reads
+/// as labelled fields rather than a run of anonymous buttons.
+private struct HeaderSlot<Content: View>: View {
+    let label: String
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Text(label.uppercased())
+                .font(Sungam.mono(Sungam.text2xs))
+                .tracking(Sungam.text2xs * Sungam.scale * 0.08)
+                .foregroundStyle(Sungam.ink45)
+            content
         }
     }
 }

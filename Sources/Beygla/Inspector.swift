@@ -1,5 +1,4 @@
 import AppKit
-import CoreMIDI
 import MoshCore
 import SwiftUI
 import UniformTypeIdentifiers
@@ -10,379 +9,35 @@ struct Inspector: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 18) {
-                filesPanel
-                sourcePanel
-                if model.triggerSource == .audio { detectionPanel }
-                if model.triggerSource == .midi { midiPanel }
-                if model.triggerSource == .sync { syncPanel }
+                // Triggers live under the picture with the timeline they
+                // draw on; this column is what happens to the frames.
+                streamPanel
                 effectsPanel
                 vectorEffectsPanel
-                streamPanel
             }
             .padding(16)
         }
         .background(Sungam.paper)
     }
 
-    // MARK: Files — neutral ink
-    //
-    // The source files are the material, not a stage of the signal, so this
-    // panel takes no section colour. The palette stays reserved for what the
-    // signal actually does.
-
-    private var filesPanel: some View {
-        PanelFrame(title: "Source", color: Sungam.ink38) {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(spacing: 8) {
-                    Text("VIDEO")
-                        .font(Sungam.mono(Sungam.text2xs))
-                        .tracking(Sungam.text2xs * Sungam.scale * 0.08)
-                        .foregroundStyle(Sungam.ink62)
-                        .frame(width: 42 * Sungam.scale, alignment: .leading)
-                    Text(model.videoURL?.lastPathComponent ?? "none")
-                        .font(Sungam.mono(Sungam.textSm))
-                        .foregroundStyle(model.videoURL == nil ? Sungam.ink38 : Sungam.ink85)
-                        .lineLimit(1).truncationMode(.middle)
-                    Spacer()
-                    LatchButton(label: "Load") { openVideo() }
-                }
-
-                Rectangle().fill(Sungam.ink13).frame(height: Sungam.hairline)
-
-                HStack(spacing: 8) {
-                    Text("AUDIO")
-                        .font(Sungam.mono(Sungam.text2xs))
-                        .tracking(Sungam.text2xs * Sungam.scale * 0.08)
-                        .foregroundStyle(Sungam.ink62)
-                        .frame(width: 42 * Sungam.scale, alignment: .leading)
-                    Text(model.audioURL?.lastPathComponent ?? "from video")
-                        .font(Sungam.mono(Sungam.textSm))
-                        .foregroundStyle(model.audioURL == nil ? Sungam.ink38 : Sungam.ink85)
-                        .lineLimit(1).truncationMode(.middle)
-                    Spacer()
-                    LatchButton(label: "Load") { openAudio() }
-                    LatchButton(label: "Clear", enabled: model.audioURL != nil) {
-                        model.loadAudio(url: nil)
-                    }
-                }
-
-                if model.audioURL != nil {
-                    Text("Overrides the video's own track — it drives detection, plays against the picture, and is muxed into the render.")
-                        .font(Sungam.mono(Sungam.textSm))
-                        .foregroundStyle(Sungam.ink45)
-                        .lineSpacing(3)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-        }
-    }
-
-    private func openVideo() {
-        let panel = NSOpenPanel()
-        panel.allowedContentTypes = [.movie, .video, .mpeg4Movie, .quickTimeMovie]
-        panel.allowsMultipleSelection = false
-        if panel.runModal() == .OK, let url = panel.url { model.load(url: url) }
-    }
-
-    private func openAudio() {
-        let panel = NSOpenPanel()
-        panel.allowedContentTypes = [.audio, .mp3, .wav, .aiff, .mpeg4Audio]
-        panel.allowsMultipleSelection = false
-        if panel.runModal() == .OK, let url = panel.url { model.loadAudio(url: url) }
-    }
-
-    // MARK: Source — coral, the trigger path
-
-    private var sourcePanel: some View {
-        PanelFrame(title: "Trigger source", color: Sungam.coral) {
-            VStack(alignment: .leading, spacing: 10) {
-                Selector(options: TriggerSource.allCases.map { ($0, $0.displayName) },
-                         selection: $model.triggerSource,
-                         color: Sungam.coral)
-
-                Text(sourceBlurb)
-                    .font(Sungam.mono(Sungam.textSm))
-                    .foregroundStyle(Sungam.ink62)
-                    .lineSpacing(4)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                // Only a live source can be armed; the grid is generated and a
-                // hand-placed trigger is placed, neither is performed.
-                if model.triggerSource == .audio || model.triggerSource == .midi {
-                    HStack(spacing: 8) {
-                        Lamp(on: model.isArmed, color: Sungam.amber, size: 9)
-                        Latch(label: model.isArmed ? "Armed — disarm" : "Arm live capture",
-                              on: Binding(
-                                get: { model.isArmed },
-                                set: { model.setArmed($0) }
-                              ),
-                              color: Sungam.amber)
-                    }
-                }
-
-                // Switching source does not move existing effects — each keeps
-                // listening to what it was set to — so say so, and offer the
-                // one-step way to move them.
-                if model.triggerSource != .manual && model.effectsOnOtherSources > 0 {
-                    HStack(spacing: 8) {
-                        Text("\(model.effectsOnOtherSources) effect\(model.effectsOnOtherSources == 1 ? "" : "s") still listen\(model.effectsOnOtherSources == 1 ? "s" : "") to another source.")
-                            .font(Sungam.mono(Sungam.text2xs))
-                            .foregroundStyle(Sungam.ink55)
-                            .fixedSize(horizontal: false, vertical: true)
-                        Spacer()
-                        LatchButton(label: "Move to \(model.triggerSource.displayName)",
-                                    color: Sungam.coral) {
-                            model.moveAllEffects(to: model.triggerSource)
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    private var sourceBlurb: String {
-        switch model.triggerSource {
-        case .audio:
-            return model.isArmed
-                ? "Listening to live input. Play the clip; every transient lands as a trigger at the playhead."
-                : "Transients in the clip's own audio become triggers. Arm to capture from a live input instead."
-        case .midi:
-            return model.isArmed
-                ? "Listening for note-ons. Play the clip and hit pads to place triggers."
-                : "Arm, then perform on a controller. Bind a rule to one note to give it its own pad."
-        case .sync:
-            return "Triggers on a fixed tempo grid. Set the BPM and note length, then put beat 1 where the track's downbeat falls."
-        case .manual:
-            return "Double-click the timeline to place triggers by hand."
-        }
-    }
-
-    // MARK: Sync — teal, matching the grid's ticks on the timeline
-
-    private var bpmBinding: Binding<Double> {
-        Binding(
-            get: { model.syncSettings.bpm },
-            set: { v in
-                let r = SyncSettings.bpmRange
-                model.syncSettings.bpm = min(max(v, r.lowerBound), r.upperBound)
-            })
-    }
-
-    private var syncPanel: some View {
-        PanelFrame(title: "Sync", color: Sungam.teal) {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack(alignment: .center, spacing: 14) {
-                    // The knob snaps to whole BPM — most tracks are — and the
-                    // field takes a decimal for the ones that are not.
-                    Knob(label: "Tempo",
-                         value: Binding(get: { model.syncSettings.bpm },
-                                        set: { bpmBinding.wrappedValue = $0.rounded() }),
-                         range: SyncSettings.bpmRange, radius: 22, color: Sungam.teal,
-                         format: { String(format: "%.0f", $0) })
-
-                    VStack(alignment: .leading, spacing: 6) {
-                        HStack(spacing: 6) {
-                            TextField("", value: bpmBinding,
-                                      format: .number.precision(.fractionLength(0 ... 2)))
-                                .textFieldStyle(.plain)
-                                .font(Sungam.mono(Sungam.textLg, weight: .bold))
-                                .foregroundStyle(Sungam.teal)
-                                .multilineTextAlignment(.trailing)
-                                .frame(width: 70 * Sungam.scale / 1.25)
-                                .padding(.horizontal, 6).padding(.vertical, 3)
-                                .overlay(Rectangle().stroke(Sungam.ink28, lineWidth: Sungam.hairline))
-                            Text("BPM")
-                                .font(Sungam.mono(Sungam.textSm))
-                                .foregroundStyle(Sungam.ink62)
-                        }
-                        HStack(spacing: 5) {
-                            LatchButton(label: "−1") { bpmBinding.wrappedValue = (model.syncSettings.bpm - 1).rounded() }
-                            LatchButton(label: "+1") { bpmBinding.wrappedValue = (model.syncSettings.bpm + 1).rounded() }
-                            LatchButton(label: "Tap", color: Sungam.teal) { model.tapTempo() }
-                        }
-                    }
-                    Spacer()
-                }
-
-                Selector(options: NoteValue.allCases.map { ($0, $0.displayName) },
-                         selection: $model.syncSettings.noteValue, color: Sungam.teal)
-
-                HStack(spacing: 8) {
-                    LabelValue(label: "Beat 1",
-                               value: String(format: "%.3fs", model.syncSettings.offset),
-                               color: Sungam.teal, size: Sungam.textSm)
-                    Spacer()
-                    LatchButton(label: "Set at playhead") { model.setDownbeatAtPlayhead() }
-                    LatchButton(label: "Zero", enabled: model.syncSettings.offset != 0) {
-                        model.syncSettings.offset = 0
-                    }
-                }
-
-                Latch(label: "Accent the downbeat",
-                      on: $model.syncSettings.accentDownbeat, color: Sungam.teal)
-                Text("Beat 1 of each bar fires at full strength and the rest at about half, so an effect's Velocity knob makes the downbeat hit hardest.")
-                    .font(Sungam.mono(Sungam.text2xs))
-                    .foregroundStyle(Sungam.ink45)
-                    .lineSpacing(3)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                let hits = model.events.filter { $0.source == .sync }.count
-                Text("\(hits) hits, one every \(String(format: "%.0f", model.syncSettings.interval * 1000)) ms")
-                    .font(Sungam.mono(Sungam.text2xs))
-                    .foregroundStyle(Sungam.ink55)
-            }
-        }
-    }
-
-    // MARK: Detection — coral, still the trigger path
-
-    private var detectionPanel: some View {
-        PanelFrame(title: "Detection", color: Sungam.coral) {
-            VStack(alignment: .leading, spacing: 12) {
-                Selector(options: OnsetBand.allCases.map { ($0, $0.shortName) },
-                         selection: Binding(
-                            get: { model.onsetSettings.band },
-                            set: { model.onsetSettings.band = $0 }
-                         ),
-                         color: Sungam.coral)
-
-                Text(model.onsetSettings.band.displayName)
-                    .font(Sungam.mono(Sungam.text2xs))
-                    .foregroundStyle(Sungam.ink38)
-
-                HStack(spacing: 14) {
-                    Knob(label: "Sensitivity",
-                         value: Binding(
-                            get: { model.onsetSettings.sensitivity },
-                            set: { model.onsetSettings.sensitivity = $0 }
-                         ),
-                         radius: 20, color: Sungam.coral,
-                         format: { String(format: "%.2f", $0) })
-
-                    Knob(label: "Hold-off",
-                         value: Binding(
-                            get: { model.onsetSettings.holdOff },
-                            set: { model.onsetSettings.holdOff = $0 }
-                         ),
-                         range: 0.02 ... 0.6, radius: 15, color: Sungam.coral,
-                         format: { String(format: "%.0fms", $0 * 1000) })
-
-                    Spacer()
-                }
-
-                if model.isArmed {
-                    VStack(alignment: .leading, spacing: 6) {
-                        HStack(spacing: 6) {
-                            Text("INPUT")
-                                .font(Sungam.mono(Sungam.text2xs))
-                                .tracking(Sungam.text2xs * Sungam.scale * 0.08)
-                                .foregroundStyle(Sungam.ink62)
-                            Lamp(on: hitRecently, color: Sungam.amber, size: 7)
-                        }
-                        SegmentMeter(level: min(1, model.audioInput.level * 2.2),
-                                     color: Sungam.coral, segments: 14)
-                            .frame(height: 8 * Sungam.scale)
-
-                        if model.audioInput.permissionDenied {
-                            Text("Microphone access denied. System Settings ▸ Privacy & Security ▸ Microphone.")
-                                .font(Sungam.mono(Sungam.text2xs))
-                                .foregroundStyle(Sungam.amber)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    private var hitRecently: Bool {
-        guard let t = model.audioInput.lastHitAt else { return false }
-        return Date().timeIntervalSince(t) < 0.12
-    }
-
-    // MARK: MIDI — steel
-
-    private var midiPanel: some View {
-        PanelFrame(title: "MIDI", color: Sungam.steel) {
-            VStack(alignment: .leading, spacing: 10) {
-                Text("INPUT DEVICE")
-                    .font(Sungam.mono(Sungam.text2xs))
-                    .tracking(Sungam.text2xs * Sungam.scale * 0.08)
-                    .foregroundStyle(Sungam.ink62)
-
-                if model.midiInput.availableSources.isEmpty {
-                    Text("No MIDI sources found. Connect a device and it appears here.")
-                        .font(Sungam.mono(Sungam.textSm))
-                        .foregroundStyle(Sungam.ink38)
-                        .fixedSize(horizontal: false, vertical: true)
-                } else {
-                    // Every position stays labelled, so the device list reads
-                    // top to bottom rather than hiding in a pop-up.
-                    Selector(options: [(MIDIUniqueID?.none, "All devices")]
-                                + model.midiInput.availableSources.map {
-                                    (MIDIUniqueID?.some($0.id), $0.name)
-                                },
-                             selection: Binding(
-                                get: { model.midiInput.selectedSourceID },
-                                set: { model.midiInput.selectedSourceID = $0 }
-                             ),
-                             color: Sungam.steel,
-                             vertical: true)
-                }
-
-                if let n = model.midiInput.lastNote {
-                    LabelValue(label: "Last",
-                               value: "\(n.number.midiNoteName)  \(n.number)  VEL \(n.velocity)  CH \(n.channel + 1)",
-                               color: Sungam.steel, size: Sungam.textSm)
-                } else if model.midiInput.isRunning {
-                    Text("Waiting for a note.")
-                        .font(Sungam.mono(Sungam.textSm))
-                        .foregroundStyle(Sungam.ink38)
-                }
-
-                if let e = model.midiInput.errorText {
-                    Text(e).font(Sungam.mono(Sungam.text2xs)).foregroundStyle(Sungam.amber)
-                }
-            }
-        }
-    }
-
     // MARK: Effects — teal, the engine
 
     private var effectsPanel: some View {
         PanelFrame(title: "Effects", color: Sungam.teal) {
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 6) {
                 // The whole palette sits above the rules it builds, so what is
-                // available is visible without opening anything.
-                Text("AVAILABLE")
-                    .font(Sungam.mono(Sungam.text2xs))
-                    .tracking(Sungam.text2xs * Sungam.scale * 0.08)
-                    .foregroundStyle(Sungam.ink45)
-
-                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 5), count: 4),
-                          spacing: 5) {
-                    ForEach(MoshOpKind.byFamily) { kind in
-                        LatchButton(label: kind.displayName, color: kind.signalColor) {
-                            model.rules.append(
-                                MoshRule(kind: kind, source: model.triggerSource,
-                                         band: model.triggerSource == .audio
-                                               ? model.onsetSettings.band : nil)
-                            )
-                        }
-                    }
-                }
-
-                HStack(spacing: 12) {
-                    ForEach(["strips": Sungam.coral, "holds": Sungam.teal,
-                             "reorders": Sungam.steel].sorted(by: { $0.key < $1.key }),
-                            id: \.key) { name, color in
-                        HStack(spacing: 5) {
-                            Lamp(on: true, color: color, size: 6)
-                            Text(name.uppercased())
-                                .font(Sungam.mono(Sungam.text2xs))
-                                .tracking(Sungam.text2xs * Sungam.scale * 0.06)
-                                .foregroundStyle(Sungam.ink45)
-                        }
+                // available is visible without opening anything. One block per
+                // family, each captioned with what the family does, on one
+                // shared four-column grid so every chip lines up.
+                ForEach(EffectFamily.all, id: \.name) { family in
+                    EffectFamilyBlock(name: family.name, caption: family.caption,
+                                      color: family.color,
+                                      items: paletteItems(family.kinds)) { kind in
+                        model.rules.append(
+                            MoshRule(kind: kind, source: model.triggerSource,
+                                     band: model.triggerSource == .audio
+                                           ? model.onsetSettings.band : nil)
+                        )
                     }
                 }
 
@@ -397,12 +52,6 @@ struct Inspector: View {
                     Text("None. Add one above.")
                         .font(Sungam.mono(Sungam.textSm))
                         .foregroundStyle(Sungam.ink38)
-                } else {
-                    Text("Drag across an effect's lane on the timeline to set where it is live. Double-click a span to remove it.")
-                        .font(Sungam.mono(Sungam.text2xs))
-                        .foregroundStyle(Sungam.ink45)
-                        .lineSpacing(3)
-                        .fixedSize(horizontal: false, vertical: true)
                 }
 
                 ForEach(Array($model.rules.enumerated()), id: \.element.id) { i, $rule in
@@ -418,6 +67,21 @@ struct Inspector: View {
         }
     }
 
+    private func paletteItems(_ kinds: [MoshOpKind])
+        -> [(label: String, help: String, uses: Int, id: MoshOpKind)] {
+        kinds.map { k in
+            (label: k.displayName, help: k.summary,
+             uses: model.rules.filter { $0.kind == k }.count, id: k)
+        }
+    }
+
+    private var vectorPaletteItems: [(label: String, help: String, uses: Int, id: VectorOpKind)] {
+        VectorOpKind.allCases.map { k in
+            (label: k.displayName, help: k.summary,
+             uses: model.vectorRules.filter { $0.kind == k }.count, id: k)
+        }
+    }
+
     // MARK: Vector effects — lilac, subordinate to the bitstream engine
     //
     // A second, optional pass: motion vectors rewritten inside frames rather
@@ -427,12 +91,7 @@ struct Inspector: View {
 
     private var vectorEffectsPanel: some View {
         PanelFrame(title: "Vector effects", color: Sungam.lilacText) {
-            VStack(alignment: .leading, spacing: 10) {
-                Text("Rewrites motion vectors inside frames instead of reordering whole ones. Ported from Datamosher Pro's FFglitch scripts.")
-                    .font(Sungam.mono(Sungam.textSm))
-                    .foregroundStyle(Sungam.ink62)
-                    .lineSpacing(4)
-                    .fixedSize(horizontal: false, vertical: true)
+            VStack(alignment: .leading, spacing: 6) {
 
                 if model.vectorEngineMissing {
                     HStack(spacing: 6) {
@@ -442,39 +101,28 @@ struct Inspector: View {
                             .foregroundStyle(Sungam.amber)
                     }
                 } else {
-                    Text("ORDER")
-                        .font(Sungam.mono(Sungam.text2xs))
-                        .tracking(Sungam.text2xs * Sungam.scale * 0.08)
-                        .foregroundStyle(Sungam.ink45)
-                    Selector(options: [(true, "Vectors first"), (false, "Frames first")],
-                             selection: $model.vectorsFirst, color: Sungam.lilacText)
-                    Text(model.vectorsFirst
-                         ? "Vector effects bend the clean picture's motion, then the frame effects rework the result."
-                         : "Frame effects mosh first and are baked into the picture, then the vector effects push that around.")
-                        .font(Sungam.mono(Sungam.text2xs))
-                        .foregroundStyle(Sungam.ink45)
-                        .lineSpacing(3)
-                        .fixedSize(horizontal: false, vertical: true)
-
-                    Rectangle().fill(Sungam.ink13).frame(height: Sungam.hairline)
-
-                    Text("AVAILABLE")
-                        .font(Sungam.mono(Sungam.text2xs))
-                        .tracking(Sungam.text2xs * Sungam.scale * 0.08)
-                        .foregroundStyle(Sungam.ink45)
-
-                    LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 5), count: 3),
-                              spacing: 5) {
-                        ForEach(VectorOpKind.allCases) { kind in
-                            LatchButton(label: kind.displayName, color: kind.signalColor) {
-                                model.vectorRules.append(
-                                    VectorRule(kind: kind, source: model.triggerSource,
-                                              band: model.triggerSource == .audio
-                                                    ? model.onsetSettings.band : nil)
-                                )
-                            }
-                        }
+                    EffectFamilyBlock(name: "Motion",
+                                      caption: "Bends motion inside frames rather than reordering them.",
+                                      color: Sungam.lilacText,
+                                      items: vectorPaletteItems) { kind in
+                        model.vectorRules.append(
+                            VectorRule(kind: kind, source: model.triggerSource,
+                                      band: model.triggerSource == .audio
+                                            ? model.onsetSettings.band : nil)
+                        )
                     }
+
+                    HStack(spacing: 8) {
+                        Text("ORDER")
+                            .font(Sungam.mono(Sungam.text2xs))
+                            .tracking(Sungam.text2xs * Sungam.scale * 0.08)
+                            .foregroundStyle(Sungam.ink45)
+                        Selector(options: [(true, "Vectors first"), (false, "Frames first")],
+                                 selection: $model.vectorsFirst, color: Sungam.lilacText)
+                    }
+                    .help(model.vectorsFirst
+                          ? "Vector effects bend the clean picture's motion, then the frame effects rework the result."
+                          : "Frame effects mosh first and are baked into the picture, then the vector effects push that around.")
 
                     if !model.vectorRules.isEmpty {
                         Rectangle().fill(Sungam.ink13).frame(height: Sungam.hairline)
@@ -507,17 +155,17 @@ struct Inspector: View {
                 Latch(label: "Strip every keyframe",
                       on: $model.moshSettings.purgeAllKeyframes, color: Sungam.steel)
                 Text(model.moshSettings.purgeAllKeyframes && model.smear != nil
-                     ? "The picture never resets — this also strips Smear's heal points, so Smear has no effect while it is on."
-                     : "The picture never resets — the whole clip becomes one continuous smear.")
-                    .font(Sungam.mono(Sungam.textSm))
+                     ? "One continuous smear. Overrides Smear while on."
+                     : "One continuous smear — the picture never resets.")
+                    .font(Sungam.mono(Sungam.text2xs))
                     .foregroundStyle(Sungam.ink45)
                     .lineSpacing(3)
                     .fixedSize(horizontal: false, vertical: true)
 
                 Latch(label: "Protect first frame",
                       on: $model.moshSettings.protectFirstFrame, color: Sungam.steel)
-                Text("Keeps the opening keyframe so the clip has something to start from.")
-                    .font(Sungam.mono(Sungam.textSm))
+                Text("Keeps the opening keyframe as a starting picture.")
+                    .font(Sungam.mono(Sungam.text2xs))
                     .foregroundStyle(Sungam.ink45)
                     .lineSpacing(3)
                     .fixedSize(horizontal: false, vertical: true)
@@ -533,7 +181,7 @@ struct Inspector: View {
 }
 
 /// One effect rule. Collapsed it reads as a lamp, a name and a duration; open
-/// it exposes the knobs. Modulation parameters are violet, and only those.
+/// it exposes the number boxes. Modulation parameters are violet, and only those.
 struct RuleRow: View {
     @EnvironmentObject var model: AppModel
     @Binding var rule: MoshRule
@@ -565,11 +213,8 @@ struct RuleRow: View {
                     .font(Sungam.mono(Sungam.textBase, weight: .bold))
                     .tracking(Sungam.textBase * Sungam.scale * 0.06)
                     .foregroundStyle(rule.enabled ? Sungam.ink85 : Sungam.ink38)
-
-                Text(rule.kind.summary)
-                    .font(Sungam.mono(Sungam.text2xs))
-                    .foregroundStyle(Sungam.ink38)
                     .lineLimit(1)
+                    .fixedSize()
 
                 Spacer()
 
@@ -584,13 +229,22 @@ struct RuleRow: View {
                     .font(Sungam.mono(Sungam.text2xs))
                     .foregroundStyle(Sungam.ink62)
 
-                LatchButton(label: "Up", enabled: onMoveUp != nil) { onMoveUp?() }
-                LatchButton(label: "Down", enabled: onMoveDown != nil) { onMoveDown?() }
-                LatchButton(label: expanded ? "Close" : "Edit") { expanded.toggle() }
-                LatchButton(label: "Del", action: onDelete)
+                LatchButton(label: expanded ? "Done" : "Edit") { expanded.toggle() }
+                LatchButton(label: "×", action: onDelete)
             }
+            .contentShape(Rectangle())
+            .onTapGesture(count: 2) { expanded.toggle() }
 
             if expanded {
+                HStack(spacing: 6) {
+                    Text(rule.kind.summary)
+                        .font(Sungam.mono(Sungam.text2xs))
+                        .foregroundStyle(Sungam.ink45)
+                        .lineLimit(1)
+                    Spacer()
+                    LatchButton(label: "↑ Earlier", enabled: onMoveUp != nil) { onMoveUp?() }
+                    LatchButton(label: "↓ Later", enabled: onMoveDown != nil) { onMoveDown?() }
+                }
                 if !rule.activeRegions.isEmpty {
                     HStack(spacing: 8) {
                         Text("Live only inside the painted spans.")
@@ -634,14 +288,15 @@ struct RuleRow: View {
                 }
 
                 // The effect's own settings.
-                HStack(spacing: 10) {
-                    Knob(label: "Length", value: $rule.duration, range: 0.03 ... 3.0,
-                         radius: 15, color: rule.kind.signalColor,
-                         format: { String(format: "%.0fms", $0 * 1000) })
-                    Knob(label: "Amount", value: $rule.amountFloor,
-                         radius: 15, color: rule.kind.signalColor,
-                         format: { String(format: "%.2f", $0) })
-                    Spacer()
+                HStack(spacing: 8) {
+                    NumBox(label: "Length", value: $rule.duration, range: 0.03 ... 3.0,
+                           color: rule.kind.signalColor, entryScale: 1000,
+                           format: { String(format: "%.0fms", $0 * 1000) })
+                    NumBox(label: "Amount", value: $rule.amountFloor,
+                           color: rule.kind.signalColor,
+                           format: { String(format: "%.2f", $0) })
+                    Color.clear.frame(maxWidth: .infinity, maxHeight: 1)
+                    Color.clear.frame(maxWidth: .infinity, maxHeight: 1)
                 }
 
                 if !jitterMatters {
@@ -653,25 +308,29 @@ struct RuleRow: View {
                 }
 
                 // Modulation — violet, and nothing else on the panel is violet.
-                HStack(spacing: 10) {
-                    Knob(label: "Velocity", value: $rule.strengthInfluence,
-                         radius: 13, color: Sungam.violet,
-                         format: { String(format: "%.2f", $0) })
-                    Knob(label: "Chance", value: $rule.probability,
-                         radius: 13, color: Sungam.violet,
-                         format: { String(format: "%.2f", $0) })
+                HStack(spacing: 8) {
+                    NumBox(label: "Velocity", value: $rule.strengthInfluence,
+                           color: Sungam.violet,
+                           format: { String(format: "%.2f", $0) })
+                    NumBox(label: "Chance", value: $rule.probability,
+                           color: Sungam.violet,
+                           format: { String(format: "%.2f", $0) })
                     if jitterMatters {
-                        Knob(label: "Jitter", value: $rule.durationJitter,
-                             radius: 13, color: Sungam.violet,
-                             format: { String(format: "%.2f", $0) })
+                        NumBox(label: "Jitter", value: $rule.durationJitter,
+                               color: Sungam.violet,
+                               format: { String(format: "%.2f", $0) })
+                    } else {
+                        Color.clear.frame(maxWidth: .infinity, maxHeight: 1)
                     }
-                    Knob(label: "Offset", value: $rule.offset, range: -0.3 ... 0.3,
-                         radius: 13, color: Sungam.violet, bipolar: true,
-                         format: { String(format: "%+.0fms", $0 * 1000) })
+                    NumBox(label: "Offset", value: $rule.offset, range: -0.3 ... 0.3,
+                           color: Sungam.violet, bipolar: true, entryScale: 1000,
+                           format: { String(format: "%+.0fms", $0 * 1000) })
                 }
             }
         }
-        .padding(10)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .background(Sungam.ink(0.03))
         .overlay(Rectangle().stroke(Sungam.ink13, lineWidth: Sungam.hairline))
     }
 }
@@ -705,11 +364,8 @@ struct VectorRuleRow: View {
                     .font(Sungam.mono(Sungam.textBase, weight: .bold))
                     .tracking(Sungam.textBase * Sungam.scale * 0.06)
                     .foregroundStyle(rule.enabled ? Sungam.ink85 : Sungam.ink38)
-
-                Text(rule.kind.summary)
-                    .font(Sungam.mono(Sungam.text2xs))
-                    .foregroundStyle(Sungam.ink38)
                     .lineLimit(1)
+                    .fixedSize()
 
                 Spacer()
 
@@ -724,13 +380,22 @@ struct VectorRuleRow: View {
                     .font(Sungam.mono(Sungam.text2xs))
                     .foregroundStyle(Sungam.ink62)
 
-                LatchButton(label: "Up", enabled: onMoveUp != nil) { onMoveUp?() }
-                LatchButton(label: "Down", enabled: onMoveDown != nil) { onMoveDown?() }
-                LatchButton(label: expanded ? "Close" : "Edit") { expanded.toggle() }
-                LatchButton(label: "Del", action: onDelete)
+                LatchButton(label: expanded ? "Done" : "Edit") { expanded.toggle() }
+                LatchButton(label: "×", action: onDelete)
             }
+            .contentShape(Rectangle())
+            .onTapGesture(count: 2) { expanded.toggle() }
 
             if expanded {
+                HStack(spacing: 6) {
+                    Text(rule.kind.summary)
+                        .font(Sungam.mono(Sungam.text2xs))
+                        .foregroundStyle(Sungam.ink45)
+                        .lineLimit(1)
+                    Spacer()
+                    LatchButton(label: "↑ Earlier", enabled: onMoveUp != nil) { onMoveUp?() }
+                    LatchButton(label: "↓ Later", enabled: onMoveDown != nil) { onMoveDown?() }
+                }
                 if !rule.activeRegions.isEmpty {
                     HStack(spacing: 8) {
                         Text("Live only inside the painted spans.")
@@ -777,33 +442,36 @@ struct VectorRuleRow: View {
                     }
                 }
 
-                HStack(spacing: 10) {
-                    Knob(label: "Length", value: $rule.duration, range: 0.03 ... 3.0,
-                         radius: 15, color: rule.kind.signalColor,
-                         format: { String(format: "%.0fms", $0 * 1000) })
-                    Knob(label: "Amount", value: $rule.amountFloor,
-                         radius: 15, color: rule.kind.signalColor,
-                         format: { String(format: "%.2f", $0) })
-                    Spacer()
+                HStack(spacing: 8) {
+                    NumBox(label: "Length", value: $rule.duration, range: 0.03 ... 3.0,
+                           color: rule.kind.signalColor, entryScale: 1000,
+                           format: { String(format: "%.0fms", $0 * 1000) })
+                    NumBox(label: "Amount", value: $rule.amountFloor,
+                           color: rule.kind.signalColor,
+                           format: { String(format: "%.2f", $0) })
+                    Color.clear.frame(maxWidth: .infinity, maxHeight: 1)
+                    Color.clear.frame(maxWidth: .infinity, maxHeight: 1)
                 }
 
-                HStack(spacing: 10) {
-                    Knob(label: "Velocity", value: $rule.strengthInfluence,
-                         radius: 13, color: Sungam.violet,
-                         format: { String(format: "%.2f", $0) })
-                    Knob(label: "Chance", value: $rule.probability,
-                         radius: 13, color: Sungam.violet,
-                         format: { String(format: "%.2f", $0) })
-                    Knob(label: "Jitter", value: $rule.durationJitter,
-                         radius: 13, color: Sungam.violet,
-                         format: { String(format: "%.2f", $0) })
-                    Knob(label: "Offset", value: $rule.offset, range: -0.3 ... 0.3,
-                         radius: 13, color: Sungam.violet, bipolar: true,
-                         format: { String(format: "%+.0fms", $0 * 1000) })
+                HStack(spacing: 8) {
+                    NumBox(label: "Velocity", value: $rule.strengthInfluence,
+                           color: Sungam.violet,
+                           format: { String(format: "%.2f", $0) })
+                    NumBox(label: "Chance", value: $rule.probability,
+                           color: Sungam.violet,
+                           format: { String(format: "%.2f", $0) })
+                    NumBox(label: "Jitter", value: $rule.durationJitter,
+                           color: Sungam.violet,
+                           format: { String(format: "%.2f", $0) })
+                    NumBox(label: "Offset", value: $rule.offset, range: -0.3 ... 0.3,
+                           color: Sungam.violet, bipolar: true, entryScale: 1000,
+                           format: { String(format: "%+.0fms", $0 * 1000) })
                 }
             }
         }
-        .padding(10)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .background(Sungam.ink(0.03))
         .overlay(Rectangle().stroke(Sungam.ink13, lineWidth: Sungam.hairline))
     }
 }
@@ -818,5 +486,106 @@ extension OnsetBand {
         case .mid: return "Mid"
         case .high: return "High"
         }
+    }
+}
+
+// MARK: - Effect palette
+
+/// The three bitstream families, in chain-colour order, each with the one line
+/// that says what its members have in common.
+struct EffectFamily {
+    let name: String
+    let caption: String
+    let color: Color
+    let kinds: [MoshOpKind]
+
+    static let all: [EffectFamily] = ["strips", "holds", "reorders"].map { f in
+        let kinds = MoshOpKind.byFamily.filter { $0.family == f }
+        let caption = ["strips": "destroy keyframes",
+                       "holds": "repeat what is there",
+                       "reorders": "change the frame order"][f] ?? ""
+        return EffectFamily(name: f, caption: caption,
+                            color: kinds.first?.signalColor ?? Sungam.ink62, kinds: kinds)
+    }
+}
+
+/// One family of add-effect chips: the family named in a narrow left column,
+/// its members five across beside it. Every chip is the same width, so the
+/// families stacked one above another line up column for column. The
+/// family's one-line description is its tooltip.
+struct EffectFamilyBlock<ID: Hashable>: View {
+    let name: String
+    let caption: String
+    let color: Color
+    var columns: Int = 5
+    let items: [(label: String, help: String, uses: Int, id: ID)]
+    let add: (ID) -> Void
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 6) {
+            HStack(spacing: 5) {
+                Rectangle().fill(color).frame(width: 5 * Sungam.scale, height: 5 * Sungam.scale)
+                Text(name.uppercased())
+                    .font(Sungam.mono(Sungam.text2xs, weight: .bold))
+                    .tracking(Sungam.text2xs * Sungam.scale * 0.04)
+                    .foregroundStyle(color)
+                    .lineLimit(1)
+                    .fixedSize()
+            }
+            .frame(width: 58 * Sungam.scale / 1.25, height: 18 * Sungam.scale, alignment: .leading)
+            .help(caption)
+
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 3), count: columns),
+                      alignment: .leading, spacing: 3) {
+                ForEach(items, id: \.id) { item in
+                    EffectChip(label: item.label, help: item.help, uses: item.uses,
+                               color: color) { add(item.id) }
+                }
+            }
+            .frame(maxWidth: .infinity)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// One effect to add: a full-width cell with its family colour as an edge,
+/// brightening under the pointer. A small lit corner marks an effect already
+/// in the chain, so the palette doubles as a summary of what is in use.
+struct EffectChip: View {
+    let label: String
+    let help: String
+    var uses: Int = 0
+    let color: Color
+    let action: () -> Void
+    @State private var hover = false
+
+    var body: some View {
+        HStack(spacing: 0) {
+            Rectangle().fill(color).frame(width: 2)
+            Text(label.uppercased())
+                .font(Sungam.mono(Sungam.text2xs))
+                .foregroundStyle(hover ? Sungam.ink : Sungam.ink85)
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+                .padding(.leading, 5)
+                .padding(.trailing, 3)
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: 18 * Sungam.scale)
+        .overlay(alignment: .topTrailing) {
+            if uses > 0 {
+                Rectangle().fill(color)
+                    .frame(width: 4 * Sungam.scale, height: 4 * Sungam.scale)
+                    .padding(3)
+            }
+        }
+        .background(hover ? color.opacity(0.16) : Sungam.ink(0.045))
+        .overlay(Rectangle().stroke(hover ? color.opacity(0.6) : Sungam.ink13,
+                                    lineWidth: Sungam.hairline))
+        .contentShape(Rectangle())
+        .onHover { hover = $0 }
+        .onTapGesture(perform: action)
+        .help(help)
     }
 }

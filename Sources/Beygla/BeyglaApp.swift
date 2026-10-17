@@ -38,7 +38,7 @@ struct BeyglaApp: App {
             ContentView()
                 .environmentObject(model)
                 .frame(minWidth: 1180, minHeight: 700)
-                .preferredColorScheme(.light)
+                .preferredColorScheme(.dark)
                 .onAppear(perform: openLaunchArgument)
         }
         .defaultSize(width: 1420, height: 880)

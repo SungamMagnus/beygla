@@ -91,7 +91,7 @@ had no other way to place an effect in time. Beygla already has one: the same
 trigger, rule, timeline-lane and region system that drives the bitstream
 effects drives these too, so that scaffolding is dropped and only the vector
 transform itself is kept. `Buffer.js`'s feedback behaviour survives as
-Delay's `Amount` knob crossing 0.5 rather than as a thirteenth separate effect,
+Delay's `Amount` setting crossing 0.5 rather than as a thirteenth separate effect,
 since the two DMP scripts differ by one line.
 
 A vector value the frame's own encoder precision cannot represent does not
@@ -212,16 +212,16 @@ full range.
 Peaks are ranked by **prominence**, how far a local maximum stands above the
 running median around it, and sensitivity selects what fraction of that ranking
 to keep. Thresholding the flux directly is the obvious approach and it gives a
-knob that does nothing across most of its travel: on sparse percussive material
+setting that does nothing across most of its travel: on sparse percussive material
 the local median sits near zero, so a multiple of it is near zero too and every
 candidate clears it at once. Measured on a test signal with three amplitude
 tiers, the old curve moved between 31 and 32 onsets across the middle 60% of
-the knob; ranking spans 7 (the kicks alone) to 36 (every transient present).
+the setting; ranking spans 7 (the kicks alone) to 36 (every transient present).
 
 The cut is widened so it never falls between hits of near-equal strength. A
 steady four-to-the-floor has eight nearly identical kicks, and a strict
 fraction would keep four and drop the rest arbitrarily — defensible as ranking,
-wrong as music. Those eight now hold at seven across the whole knob.
+wrong as music. Those eight now hold at seven across the whole range.
 
 Detected times are reported at the **centre** of the analysis window rather than
 its start. Without that correction every onset reads about 12 ms early, which is
@@ -315,15 +315,16 @@ removes the partial file.
 ### Sync to a tempo
 
 Set the trigger source to **Sync** and effects fire on a fixed grid instead of
-on detected transients. Set the tempo with the knob (which snaps to whole BPM),
-the field (which takes decimals), ±1, or **Tap** along — the last eight taps
-are averaged, and a pause of two seconds starts a new count. Pick the note
-length from a bar down to sixteenths, with quarter and eighth triplets.
+on detected transients. Set the tempo in the BPM box — drag it (it snaps to
+whole BPM) or double-click and type a decimal — or **Tap** along: the last
+eight taps are averaged, and a pause of two seconds starts a new count. Pick
+the note length from a bar down to sixteenths, with quarter and eighth
+triplets.
 
-Put **beat 1** where the track's downbeat falls with *Set at playhead*. Hits
+Put **beat 1** where the track's downbeat falls with *At playhead*. Hits
 before beat 1 are still generated, counting backward, so a track with a pickup
-is covered. With *Accent the downbeat* on, beat 1 of each bar fires at full
-strength and the rest at about half, so an effect's Velocity knob makes the
+is covered. With *Accent* on, beat 1 of each bar fires at full
+strength and the rest at about half, so an effect's Velocity setting makes the
 downbeat hit hardest.
 
 Positions are computed as `offset + n × interval` from an integer n rather than
@@ -332,13 +333,14 @@ floating-point drift and land its last hits late.
 
 Switching the source to Sync does not move existing effects: each keeps
 listening to the source it was set to, so grid-driven and audio-driven effects
-can run in the same render. The source panel says when effects are listening
+can run in the same render. The trigger strip says when effects are listening
 elsewhere and offers to move them all in one step.
 
 ### Playing
 
-**Play from start** plays the clip from the beginning. **Play from In** plays
-the range — from the in point, stopping at the out point. Space pauses and
+**Play** plays the clip from the beginning. Once an in or out point is set,
+**Play range** appears beside it and plays from the in point, stopping at the
+out point. Space pauses and
 resumes from wherever the playhead is.
 
 ### In and out
@@ -375,7 +377,7 @@ It is a wet/dry blend of finished pictures rather than a scale on each
 effect's own Amount, and that is deliberate. A global multiplier on Amount
 would be inconsistent at best: six of the fifteen bitstream effects ignore
 Amount entirely, Sort uses it as a direction switch, and Zoom and Shear are
-bipolar around the middle of the knob — scaling them toward zero would turn a
+bipolar around the middle of its range — scaling them toward zero would turn a
 zoom-out into a zoom-in. The blend acts the same way on every effect in both
 families. Measured on a frame mid-clip, the difference from the clean source
 scales linearly: 1.00, 0.75, 0.50, 0.25 and 0.00 of full at 100, 75, 50, 25 and
@@ -394,11 +396,11 @@ effect has corrupted the picture, every following delta frame keeps building
 on the corrupted pixels until a keyframe repaints them. Beygla puts keyframes
 only where it is told to, so until now a smear lasted until the content
 happened to repaint itself — a scene cut, a large movement — rather than for
-any time you chose. That also meant Bloom's Length knob usually did nothing: Bloom at
+any time you chose. That also meant Bloom's Length setting usually did nothing: Bloom at
 0.1 s and at 1.0 s rendered byte-identical output. (Usually, not always —
 Bloom strips every keyframe in its span, so a span long enough to reach the
 keyframe a following trigger forces swallows that one too and keeps smearing.
-Where neither that nor Smear applies, a Bloom row hides its Jitter knob and
+Where neither that nor Smear applies, a Bloom row hides its Jitter setting and
 says why.)
 
 With Smear set, a clean keyframe is forced into the encode that long after
@@ -530,12 +532,26 @@ through Beygla's own engine, with a frame pulled from a few past the bloom.
 Beygla is built on the
 [Sungam design system](https://github.com/SungamMagnus/sungam-design-system),
 which means the app is a panel, not a form. `SungamKit.swift` ports the
-system's primitives to SwiftUI: `PanelFrame`, `Knob`, `Latch`, `Selector`,
-`Lamp`, `SegmentMeter` and `Wordmark`.
+system's primitives to SwiftUI: `PanelFrame`, `NumBox`, `Latch`, `Selector`,
+`DropdownLatch`, `Lamp`, `SegmentMeter` and `Wordmark`.
+
+### Layout
+
+The header holds the three choices everything else hangs off — video, audio
+and trigger source — with Mix, Smear, Preview and Render on the right. Under
+the picture sit the transport, a single **trigger strip** whose controls change
+with the source (band, sensitivity and hold-off for audio; device for MIDI;
+tempo, note length and beat 1 for sync), and the timeline those triggers land
+on. The inspector on the right is only what happens to the frames: Stream,
+then Effects, then Vector effects. Each effect family is one row of
+equal-width chips; a lit corner marks one already in the chain.
 
 The system's rules are kept rather than approximated:
 
-- **Flat paper.** `#f0ece2` throughout, no gradients, no textures.
+- **Flat paper.** A graphite edition: paper `#2e2d2b` and ink `#ece8df`
+  trade places with the light system, and the picture sits on a step darker
+  (`#201f1e`), so the chrome never competes with the video. No gradients, no
+  textures.
 - **No shadows.** A control reads by its outline and its arc.
 - **Square corners** everywhere.
 - **Hairline borders** at partial ink opacity, never a separate grey.
@@ -547,9 +563,10 @@ The system's rules are kept rather than approximated:
   or outlined square for a lamp, a filled or outlined rectangle for a latch,
   plain text for everything else. There were seven SF Symbols in the first
   build and there are none now.
-- **Knobs sweep 317.2°**, leaving the gap at the bottom where the pointer never
-  goes. Drag vertically; hold shift for a finer drag. Bipolar knobs — only
-  Offset — grow their arc from noon.
+- **Number boxes, not knobs.** Every continuous value is a `NumBox`: the
+  value in a box with a faint fill showing where it sits in its range. Drag
+  vertically; hold shift for a finer drag; double-click to type. The bipolar
+  one — Offset — fills from the centre.
 
 ### Colour is signal
 
