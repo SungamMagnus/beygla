@@ -235,58 +235,9 @@ struct RuleRow: View {
             .contentShape(Rectangle())
             .onTapGesture(count: 2) { expanded.toggle() }
 
+            // Open, top to bottom: what it does (the numbers), when it fires
+            // (the trigger), and what it is (the note).
             if expanded {
-                HStack(spacing: 6) {
-                    Text(rule.kind.summary)
-                        .font(Sungam.mono(Sungam.text2xs))
-                        .foregroundStyle(Sungam.ink45)
-                        .lineLimit(1)
-                    Spacer()
-                    LatchButton(label: "↑ Earlier", enabled: onMoveUp != nil) { onMoveUp?() }
-                    LatchButton(label: "↓ Later", enabled: onMoveDown != nil) { onMoveDown?() }
-                }
-                if !rule.activeRegions.isEmpty {
-                    HStack(spacing: 8) {
-                        Text("Live only inside the painted spans.")
-                            .font(Sungam.mono(Sungam.text2xs))
-                            .foregroundStyle(Sungam.ink55)
-                        Spacer()
-                        LatchButton(label: "Always") { rule.activeRegions.removeAll() }
-                    }
-                }
-
-                Text(rule.kind.blurb)
-                    .font(Sungam.mono(Sungam.textSm))
-                    .foregroundStyle(Sungam.ink70)
-                    .lineSpacing(4)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.vertical, 2)
-
-                Selector(options: TriggerSource.allCases.map { ($0, $0.displayName) },
-                         selection: $rule.source, color: rule.kind.signalColor)
-
-                if rule.source == .audio {
-                    Selector(options: OnsetBand.allCases.map { ($0, $0.shortName) },
-                             selection: Binding(
-                                get: { rule.band ?? .full },
-                                set: { rule.band = $0 }
-                             ),
-                             color: rule.kind.signalColor)
-                }
-
-                if rule.source == .midi {
-                    HStack(spacing: 8) {
-                        LabelValue(label: "Note",
-                                   value: rule.note.map { "\($0.midiNoteName)" } ?? "ANY",
-                                   color: Sungam.steel, size: Sungam.textSm)
-                        Spacer()
-                        LatchButton(label: "Learn", enabled: lastNote != nil) {
-                            rule.note = lastNote
-                        }
-                        LatchButton(label: "Any") { rule.note = nil }
-                    }
-                }
-
                 // The effect's own settings.
                 HStack(spacing: 8) {
                     NumBox(label: "Length", value: $rule.duration, range: 0.03 ... 3.0,
@@ -297,14 +248,6 @@ struct RuleRow: View {
                            format: { String(format: "%.2f", $0) })
                     Color.clear.frame(maxWidth: .infinity, maxHeight: 1)
                     Color.clear.frame(maxWidth: .infinity, maxHeight: 1)
-                }
-
-                if !jitterMatters {
-                    Text("Length and Jitter don't change a Bloom here: it strips its own keyframe whatever its length. They start to matter once Smear is set, or when a span reaches the next trigger.")
-                        .font(Sungam.mono(Sungam.text2xs))
-                        .foregroundStyle(Sungam.ink45)
-                        .lineSpacing(3)
-                        .fixedSize(horizontal: false, vertical: true)
                 }
 
                 // Modulation — violet, and nothing else on the panel is violet.
@@ -326,12 +269,96 @@ struct RuleRow: View {
                            color: Sungam.violet, bipolar: true, entryScale: 1000,
                            format: { String(format: "%+.0fms", $0 * 1000) })
                 }
+
+                RuleTriggerSection(source: $rule.source, band: $rule.band, note: $rule.note,
+                                   hasSpans: !rule.activeRegions.isEmpty,
+                                   clearSpans: { rule.activeRegions.removeAll() },
+                                   lastNote: lastNote, color: rule.kind.signalColor,
+                                   onMoveUp: onMoveUp, onMoveDown: onMoveDown)
+
+                RuleInfo(text: rule.kind.blurb,
+                         aside: jitterMatters ? nil
+                             : "Length and Jitter only change a Bloom once Smear is set or a span reaches the next trigger.")
             }
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 5)
         .background(Sungam.ink(0.03))
         .overlay(Rectangle().stroke(Sungam.ink13, lineWidth: Sungam.hairline))
+    }
+}
+
+/// The middle of an open effect: which source it listens to, the band or
+/// note within that source, whether it is painted onto spans, and where it
+/// sits in the chain. Shared by both kinds of effect row.
+struct RuleTriggerSection: View {
+    @Binding var source: TriggerSource
+    @Binding var band: OnsetBand?
+    @Binding var note: Int?
+    var hasSpans: Bool
+    var clearSpans: () -> Void
+    var lastNote: Int?
+    var color: Color
+    var onMoveUp: (() -> Void)?
+    var onMoveDown: (() -> Void)?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Rectangle().fill(Sungam.ink13).frame(height: Sungam.hairline)
+
+            Selector(options: TriggerSource.allCases.map { ($0, $0.displayName) },
+                     selection: $source, color: color)
+
+            if source == .audio {
+                Selector(options: OnsetBand.allCases.map { ($0, $0.shortName) },
+                         selection: Binding(get: { band ?? .full }, set: { band = $0 }),
+                         color: color)
+            }
+
+            HStack(spacing: 6) {
+                if source == .midi {
+                    LabelValue(label: "Note", value: note.map { "\($0.midiNoteName)" } ?? "ANY",
+                               color: Sungam.steel, size: Sungam.text2xs)
+                    LatchButton(label: "Learn", enabled: lastNote != nil) { note = lastNote }
+                    LatchButton(label: "Any") { note = nil }
+                }
+                if hasSpans {
+                    Text("Painted spans only")
+                        .font(Sungam.mono(Sungam.text2xs))
+                        .foregroundStyle(color)
+                    LatchButton(label: "Always", action: clearSpans)
+                }
+                Spacer()
+                LatchButton(label: "↑ Earlier", enabled: onMoveUp != nil) { onMoveUp?() }
+                LatchButton(label: "↓ Later", enabled: onMoveDown != nil) { onMoveDown?() }
+            }
+        }
+    }
+}
+
+/// The foot of an open effect: what it does, in a sentence or two, set quiet
+/// under a hairline so it reads as reference rather than as a control.
+struct RuleInfo: View {
+    let text: String
+    var aside: String? = nil
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Rectangle().fill(Sungam.ink13).frame(height: Sungam.hairline)
+            Text(text)
+                .font(Sungam.mono(Sungam.text2xs))
+                .foregroundStyle(Sungam.ink55)
+                .lineSpacing(2)
+                .fixedSize(horizontal: false, vertical: true)
+            if let aside {
+                Text(aside)
+                    .font(Sungam.mono(Sungam.text2xs))
+                    .foregroundStyle(Sungam.ink38)
+                    .lineSpacing(2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(.bottom, 2)
     }
 }
 
@@ -386,62 +413,8 @@ struct VectorRuleRow: View {
             .contentShape(Rectangle())
             .onTapGesture(count: 2) { expanded.toggle() }
 
+            // Same order as a frame effect: numbers, trigger, note.
             if expanded {
-                HStack(spacing: 6) {
-                    Text(rule.kind.summary)
-                        .font(Sungam.mono(Sungam.text2xs))
-                        .foregroundStyle(Sungam.ink45)
-                        .lineLimit(1)
-                    Spacer()
-                    LatchButton(label: "↑ Earlier", enabled: onMoveUp != nil) { onMoveUp?() }
-                    LatchButton(label: "↓ Later", enabled: onMoveDown != nil) { onMoveDown?() }
-                }
-                if !rule.activeRegions.isEmpty {
-                    HStack(spacing: 8) {
-                        Text("Live only inside the painted spans.")
-                            .font(Sungam.mono(Sungam.text2xs))
-                            .foregroundStyle(Sungam.ink55)
-                        Spacer()
-                        LatchButton(label: "Always") { rule.activeRegions.removeAll() }
-                    }
-                }
-
-                Text(rule.kind.blurb)
-                    .font(Sungam.mono(Sungam.textSm))
-                    .foregroundStyle(Sungam.ink70)
-                    .lineSpacing(4)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.vertical, 2)
-
-                Text("Ported from \(rule.kind.source)")
-                    .font(Sungam.mono(Sungam.text2xs))
-                    .foregroundStyle(Sungam.ink38)
-
-                Selector(options: TriggerSource.allCases.map { ($0, $0.displayName) },
-                         selection: $rule.source, color: rule.kind.signalColor)
-
-                if rule.source == .audio {
-                    Selector(options: OnsetBand.allCases.map { ($0, $0.shortName) },
-                             selection: Binding(
-                                get: { rule.band ?? .full },
-                                set: { rule.band = $0 }
-                             ),
-                             color: rule.kind.signalColor)
-                }
-
-                if rule.source == .midi {
-                    HStack(spacing: 8) {
-                        LabelValue(label: "Note",
-                                   value: rule.note.map { "\($0.midiNoteName)" } ?? "ANY",
-                                   color: Sungam.steel, size: Sungam.textSm)
-                        Spacer()
-                        LatchButton(label: "Learn", enabled: lastNote != nil) {
-                            rule.note = lastNote
-                        }
-                        LatchButton(label: "Any") { rule.note = nil }
-                    }
-                }
-
                 HStack(spacing: 8) {
                     NumBox(label: "Length", value: $rule.duration, range: 0.03 ... 3.0,
                            color: rule.kind.signalColor, entryScale: 1000,
@@ -467,6 +440,14 @@ struct VectorRuleRow: View {
                            color: Sungam.violet, bipolar: true, entryScale: 1000,
                            format: { String(format: "%+.0fms", $0 * 1000) })
                 }
+
+                RuleTriggerSection(source: $rule.source, band: $rule.band, note: $rule.note,
+                                   hasSpans: !rule.activeRegions.isEmpty,
+                                   clearSpans: { rule.activeRegions.removeAll() },
+                                   lastNote: lastNote, color: rule.kind.signalColor,
+                                   onMoveUp: onMoveUp, onMoveDown: onMoveDown)
+
+                RuleInfo(text: rule.kind.blurb, aside: "Ported from \(rule.kind.source)")
             }
         }
         .padding(.horizontal, 8)

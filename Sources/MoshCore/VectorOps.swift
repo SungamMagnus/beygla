@@ -80,96 +80,27 @@ public enum VectorOpKind: String, Codable, CaseIterable, Identifiable, Sendable 
     public var blurb: String {
         switch self {
         case .sink:
-            return """
-            Leaves slow motion alone and zeroes anything faster than a \
-            threshold, so a moving subject's fastest-moving edges freeze while \
-            its slow interior keeps tracking. The frozen blocks stay pinned to \
-            wherever they were the instant the threshold was crossed. Amount \
-            lowers the threshold — higher catches more of the frame.
-            """
+            return "Freezes blocks moving faster than a threshold; slow motion carries on. Amount lowers the threshold."
         case .stop:
-            return """
-            Zeroes every motion vector in the frame, unconditionally. Unlike \
-            Sink there is no threshold: the whole picture's motion goes dead \
-            at once, which reads as a much harder cut than a bitstream freeze \
-            because the blocks that would have moved are still being \
-            re-drawn — they are just being told to stay exactly still.
-            """
+            return "Zeroes all motion in the frame: a harder stop than Freeze, because the blocks keep redrawing in place."
         case .invertReverse:
-            return """
-            Negates every vector, so whatever was moving right now moves left \
-            by the same amount, and up becomes down. The picture's content \
-            keeps updating normally; only the direction motion pushes it is \
-            reversed, which reads as the frame's content flowing backwards \
-            through itself.
-            """
+            return "Flips every motion vector, so right becomes left and up becomes down. The content flows backwards through itself."
         case .mirror:
-            return """
-            Reflects the motion field left to right and negates the \
-            horizontal component, so the right half of the picture is pushed \
-            by a mirror image of what is happening on the left. Symmetric \
-            content barely changes; anything asymmetric develops a seam down \
-            the middle where the two mismatched motions meet.
-            """
+            return "Mirrors the motion left to right. Symmetric shots barely change; anything else splits down the middle."
         case .vibrate:
-            return """
-            Adds an independent random offset to every block's vector, every \
-            frame. Nothing drifts in one direction — each macroblock shudders \
-            on its own axis, which reads as a fine, even static laid over \
-            whatever the frame's real motion was doing. Amount sets how far \
-            each block can jump.
-            """
+            return "Shakes every block in a random direction each frame, like static over the real motion. Amount sets how far."
         case .zoom:
-            return """
-            Adds an outward radial push to every vector, scaled by how far \
-            that block sits from the frame's centre — corners are pushed \
-            hardest, the centre barely at all. Stacked on top of the frame's \
-            real motion, so a subject already moving still carries on doing \
-            so, just with the whole picture also pulling apart from the \
-            middle. Negative amount pulls inward instead.
-            """
+            return "Adds an outward pull that grows towards the corners, on top of the real motion. Negative amounts pull inward."
         case .slamZoom:
-            return """
-            The same radial field as Zoom, but it replaces each vector \
-            instead of adding to it — the frame's real motion is discarded \
-            entirely and only the outward pull remains. Reads as a much \
-            harder, more mechanical zoom with none of the original motion's \
-            texture left in it.
-            """
+            return "Like Zoom, but replaces the real motion with the pull: harder and more mechanical."
         case .shear:
-            return """
-            Adds a diagonal offset that grows with distance from centre, \
-            pushing opposite corners in opposite directions. The picture \
-            reads as being dragged across itself on a slant rather than \
-            pulled apart symmetrically the way Zoom does.
-            """
+            return "Pushes opposite corners in opposite directions, dragging the picture across itself on a slant."
         case .delay:
-            return """
-            Replaces each block's vector with the vector that same block had \
-            several frames ago, so the picture's motion runs on a tape delay \
-            — it answers to what was happening a moment in the past rather \
-            than what is happening now. Feedback blends a fraction of the \
-            delayed value back into the buffer instead of swapping it \
-            outright, which is the difference between a hard echo and a \
-            trailing one.
-            """
+            return "Each block moves the way it did a few frames ago. Feedback turns a hard echo into a trailing one."
         case .shift:
-            return """
-            Feeds each block's vertical motion into the next frame's, with a \
-            constant added each time — motion that was drifting keeps \
-            drifting, and accumulates, the way gravity keeps accelerating \
-            something already falling. Reads as the picture sliding downward \
-            and picking up speed rather than any one frame's motion looking \
-            unusual on its own.
-            """
+            return "Motion keeps falling and speeding up, like gravity, so the picture slides downward."
         case .noise:
-            return """
-            Finds the fastest-moving block in the frame, then multiplies \
-            every block moving slower than half that speed by a large \
-            factor. It is the inverse of what a glitch usually does: instead \
-            of the busy parts of the picture breaking, the parts that were \
-            holding still convulse instead.
-            """
+            return "Makes the stillest blocks convulse instead of the busiest ones."
         }
     }
 }

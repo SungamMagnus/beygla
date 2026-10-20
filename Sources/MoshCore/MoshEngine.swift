@@ -72,7 +72,8 @@ public enum MoshOpKind: String, Codable, CaseIterable, Identifiable, Sendable {
         }
     }
 
-    /// What the effect does to the bitstream, and what that looks like.
+    /// What the effect does to the bitstream, and what that looks like — one
+    /// or two sentences, short enough to sit under the controls.
     ///
     /// A compressed stream has two kinds of frame: a keyframe, which is a whole
     /// picture, and a delta frame, which carries only motion vectors and a small
@@ -82,35 +83,35 @@ public enum MoshOpKind: String, Codable, CaseIterable, Identifiable, Sendable {
     public var blurb: String {
         switch self {
         case .bloom:
-            return "Deletes the keyframes inside the range. With no whole picture to reset to, the incoming scene's motion vectors are applied to the outgoing scene's pixels: the old image gets dragged around by the new image's movement, holding its colours while taking on the wrong shape. It bites hardest at a hard cut, where the two pictures have nothing in common."
+            return "Deletes the keyframes in range, so the next scene's motion drags the old scene's pixels around. Strongest on a hard cut."
         case .glide:
-            return "Picks the last delta frame before the range and re-applies that same one for every frame in it. The decoder keeps shifting pixels in the one direction that frame described, so the picture slides steadily and smears into itself. It does not decay — a longer range drifts further, and the image eventually pulls apart."
+            return "Repeats one delta frame through the range, so the picture keeps sliding one way and smears. Longer ranges drift further."
         case .echo:
-            return "Loops the first few delta frames of the range over and over. The same short burst of motion replays on an ever-changing picture, so the image churns in a cycle instead of drifting one way. Amount sets the loop length: low is a tight flutter, high is a longer repeating phrase."
+            return "Loops the first few delta frames, so the image churns in a cycle. Amount sets the loop length."
         case .stutter:
-            return "Keeps one frame in every few and replaces the rest with skip frames, so the picture updates in steps rather than continuously. The result is a hard rhythmic judder that holds dead still between updates. Amount sets the step: higher holds longer and reads slower and coarser."
+            return "Keeps one frame in every few and holds between them: a hard, rhythmic judder. Amount sets the step."
         case .reverse:
-            return "Plays the range's delta frames back to front. Motion that was pushing one way now pulls the other, against a picture that never reset, so shapes crawl backwards through themselves. Any keyframe landing inside the reversed run is neutralised — left in, it would snap the picture back."
+            return "Plays the range's motion backwards over a picture that never resets, so shapes crawl back through themselves."
         case .shuffle:
-            return "Randomly permutes the delta frames in the range, so each frame's motion is applied at the wrong moment to the wrong picture. The image tears into blocks that drift independently. The render is seeded, so the same project always produces the same scramble."
+            return "Scrambles the delta frames, so blocks tear and drift apart. Seeded, so a project always renders the same."
         case .freeze:
-            return "Replaces every frame in the range with a skip frame, which tells the decoder the picture is unchanged. Motion stops dead and nothing smears — the one effect here that holds perfectly still. Useful as a held beat between two moving ones."
+            return "Holds the picture dead still with no smear. Good as a rest between two moving effects."
         case .void:
-            return "Kills every frame carrying more data than a threshold. Keyframes are the biggest frames in any stream so they go first, but so do the heavy refresh frames a codec spends whenever too much of the picture changes at once. What survives is only the cheap, small motion, which is why the result drifts rather than cuts. Amount sets how aggressive the threshold is."
+            return "Drops every frame heavier than a threshold, keyframes first, so the picture drifts instead of cutting. Amount sets the threshold."
         case .invert:
-            return "Swaps each frame with its neighbour, so every pair of instructions arrives in the wrong order. Motion advances then immediately corrects itself, one frame out of step the whole way through, and the picture develops a fine shudder without ever losing its subject."
+            return "Swaps each frame with its neighbour, so motion steps forward and back: a fine shudder that keeps its subject."
         case .weave:
-            return "Interleaves the range with itself reversed: first frame, last frame, second, second-last, and inwards. Two contradictory directions of motion are applied on alternate frames, so the picture is pulled apart and back together at the frame rate. Keyframes inside the range are neutralised."
+            return "Alternates the range forwards and backwards, pulling the picture apart and back together every frame."
         case .jiggle:
-            return "Displaces each frame in time by a random amount drawn from a bell curve about zero, so the stream mostly advances but never lands exactly where it should. Motion stumbles rather than tears. Amount widens the curve — small values read as nervousness, large ones scramble the range."
+            return "Nudges each frame a random distance in time, so motion stumbles. Amount sets how far."
         case .overlap:
-            return "Takes a run of frames, steps back less than the run's length, and takes another — so every run replays part of the one before it. Motion keeps starting over before it has finished, which stacks partial movements on top of each other. Amount sets the run length."
+            return "Each run of frames replays part of the one before, stacking half-finished movements. Amount sets the run length."
         case .sort:
-            return "Reorders the range by how many bytes each frame carries. Frame size tracks how much changed, so this sorts by how violent each moment was and plays them in that order. Below halfway it runs quiet to loud and gathers into a burst; above, it leads with the violence and decays."
+            return "Reorders frames by size, which tracks how much changed. Below half builds quiet to loud; above half starts loud and decays."
         case .rise:
-            return "Skips forward through the range, taking every second frame or every eighth, then holds on the last one it reached. Motion accelerates away and then stops dead. Amount sets the stride, so a long range with a wide stride arrives early and waits."
+            return "Skips ahead through the range, then holds the last frame it reached. Amount sets the stride."
         case .blockShuffle:
-            return "Shuffles the range in blocks rather than one frame at a time, so motion stays coherent inside each block and only the joins between them are wrong. The picture keeps moving convincingly and then jumps, which reads as a stutter edit rather than as noise. Amount sets the block length."
+            return "Shuffles in blocks, so motion stays smooth inside each one and jumps at the joins, like a stutter edit. Amount sets the block length."
         }
     }
 
