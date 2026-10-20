@@ -81,7 +81,7 @@ it, just with these eleven effects unavailable.
 | **Zoom** | Adds an outward (or, at low amount, inward) radial push from centre. |
 | **Slam Zoom** | Replaces motion with a pure radial field instead of adding to it. |
 | **Shear** | Adds a diagonal offset that grows with distance from centre. |
-| **Delay** | Replaces each block's vector with one from several frames ago; Amount past halfway blends a feedback trail instead of a hard swap. |
+| **Delay** | Replaces each block's vector with that block's own motion from 1–12 frames earlier, read from a running history of the clip. |
 | **Shift** | Feeds vertical motion into the next frame with a constant added each time, like gravity accelerating a fall. |
 | **Noise** | Multiplies the *slowest*-moving blocks instead of the fastest — the inverse of what a glitch usually does. |
 
@@ -90,9 +90,8 @@ for N frames if a coin flip exceeds 95" — because the tool it was written for
 had no other way to place an effect in time. Beygla already has one: the same
 trigger, rule, timeline-lane and region system that drives the bitstream
 effects drives these too, so that scaffolding is dropped and only the vector
-transform itself is kept. `Buffer.js`'s feedback behaviour survives as
-Delay's `Amount` setting crossing 0.5 rather than as a thirteenth separate effect,
-since the two DMP scripts differ by one line.
+transform itself is kept. `Buffer.js` is folded into Delay rather than kept
+as a thirteenth separate effect, since the two DMP scripts differ by one line.
 
 A vector value the frame's own encoder precision cannot represent does not
 fail cleanly on import — it decodes as a handful of visibly corrupted
@@ -545,6 +544,32 @@ tempo, note length and beat 1 for sync), and the timeline those triggers land
 on. The inspector on the right is only what happens to the frames: Stream,
 then Effects, then Vector effects. Each effect family is one row of
 equal-width chips; a lit corner marks one already in the chain.
+
+Each effect's lane on the timeline is one row high until you click it. Open,
+it shows the shared triggers that reach it as faint stems and gives the effect
+triggers of its own: click to place one (higher is stronger), drag one to move
+it in time or change its strength, double-click to delete it. An effect's own
+triggers fire that effect alone, whatever its source or painted spans. Click
+the lane's header strip to close it again.
+
+### Effect controls
+
+Every effect has Length, Chance, Jitter and Offset. **Amount** is what a
+full-strength trigger delivers, scaled to the span's own length, and
+**Velocity** sets how much weaker hits fall short of it; both are hidden on
+Bloom, Freeze, Weave, Stop and Mirror, which have no "more" to give. Glide's
+Amount is its speed, Reverse's the chunk it reverses, and Invert's how far
+apart the swapped frames are; the vector Invert blends from untouched through
+stopped to fully reversed.
+
+**Seed** appears wherever something is random — Shuffle, Jiggle, Blocks,
+Vibrate, or any effect with Chance below 1 or Jitter above 0. Click it for a
+new variation with nothing else changed.
+
+Vector effects add **Decay**, which fades Amount across the span instead of
+cutting off at its end, and their own settings: Axis for Mirror and Vibrate,
+Direction for Shift, a Centre for Zoom, Slam Zoom and Shear (type it, or press
+*Pick* and click the picture), Feedback for Delay, and Threshold for Noise.
 
 The system's rules are kept rather than approximated:
 

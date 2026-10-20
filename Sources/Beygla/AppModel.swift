@@ -530,6 +530,60 @@ public final class AppModel: ObservableObject {
 
     public func clearTriggers() { events.removeAll() }
 
+    // MARK: - Per-effect triggers
+
+    /// A vector effect waiting for a click on the picture to set its centre.
+    @Published public var centrePickRule: UUID?
+
+    /// Set a radial effect's centre from a point on the picture, as fractions
+    /// of the frame, and leave pick mode.
+    public func setCentre(x: Double, y: Double) {
+        guard let id = centrePickRule,
+              let i = vectorRules.firstIndex(where: { $0.id == id }) else { return }
+        vectorRules[i].centreX = min(max(x, 0), 1)
+        vectorRules[i].centreY = min(max(y, 0), 1)
+        centrePickRule = nil
+    }
+
+    /// Lanes opened on the timeline for editing their own triggers.
+    @Published public var expandedLanes: Set<UUID> = []
+
+    public func toggleLane(_ ruleID: UUID) {
+        if expandedLanes.contains(ruleID) { expandedLanes.remove(ruleID) }
+        else { expandedLanes.insert(ruleID) }
+    }
+
+    /// A trigger that fires one effect only — placed on that effect's lane.
+    @discardableResult
+    public func addTrigger(for ruleID: UUID, at time: Double, strength: Double = 1) -> UUID {
+        let e = TriggerEvent(time: clampToClip(time), strength: min(max(strength, 0.05), 1),
+                             source: .manual, ruleID: ruleID)
+        events.append(e)
+        events.sort { $0.time < $1.time }
+        return e.id
+    }
+
+    public func moveTrigger(_ id: UUID, to time: Double, strength: Double) {
+        guard let i = events.firstIndex(where: { $0.id == id }) else { return }
+        events[i].time = clampToClip(time)
+        events[i].strength = min(max(strength, 0.05), 1)
+        events.sort { $0.time < $1.time }
+    }
+
+    public func removeTrigger(_ id: UUID) {
+        events.removeAll { $0.id == id }
+    }
+
+    /// Called when an effect is deleted, so its own triggers go with it.
+    public func removeTriggers(for ruleID: UUID) {
+        events.removeAll { $0.ruleID == ruleID }
+        expandedLanes.remove(ruleID)
+    }
+
+    private func clampToClip(_ t: Double) -> Double {
+        min(max(0, t), info?.duration ?? t)
+    }
+
     // MARK: - Where each effect is live
 
     /// Paint a span on a rule's lane. Until a rule has one, it is live

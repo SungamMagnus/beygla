@@ -132,6 +132,8 @@ struct ContentView: View {
                         .padding(12)
                 }
 
+                if model.centrePickRule != nil { centrePickLayer }
+
                 if model.videoURL == nil {
                     VStack(spacing: 10) {
                         Wordmark(text: "Drop a video", size: Sungam.textLg, color: Sungam.ink38)
@@ -178,6 +180,54 @@ struct ContentView: View {
             .background(Sungam.paper)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    /// While a radial effect waits for its centre: a crosshair on the picture
+    /// and a click that sets it. The picture is aspect-fitted inside the
+    /// stage's padding, so the click is mapped through that fitted rectangle.
+    private var centrePickLayer: some View {
+        GeometryReader { geo in
+            let box = CGRect(x: 12, y: 12, width: geo.size.width - 24, height: geo.size.height - 24)
+            let video = fittedRect(in: box)
+            let rule = model.vectorRules.first { $0.id == model.centrePickRule }
+            ZStack(alignment: .topLeading) {
+                Color.clear.contentShape(Rectangle())
+                    .onTapGesture { p in
+                        guard video.contains(p) else { model.centrePickRule = nil; return }
+                        model.setCentre(x: (p.x - video.minX) / video.width,
+                                        y: (p.y - video.minY) / video.height)
+                    }
+                if let rule {
+                    let c = CGPoint(x: video.minX + video.width * rule.centreX,
+                                    y: video.minY + video.height * rule.centreY)
+                    Path { p in
+                        p.move(to: CGPoint(x: c.x - 14, y: c.y)); p.addLine(to: CGPoint(x: c.x + 14, y: c.y))
+                        p.move(to: CGPoint(x: c.x, y: c.y - 14)); p.addLine(to: CGPoint(x: c.x, y: c.y + 14))
+                    }
+                    .stroke(rule.kind.signalColor, lineWidth: 2)
+                    .allowsHitTesting(false)
+                }
+                Text("CLICK THE PICTURE TO SET \((rule?.kind.displayName ?? "").uppercased())'S CENTRE")
+                    .font(Sungam.mono(Sungam.textSm, weight: .bold))
+                    .tracking(Sungam.textSm * Sungam.scale * 0.08)
+                    .foregroundStyle(Sungam.lilacText)
+                    .padding(.horizontal, 10).padding(.vertical, 6)
+                    .background(Sungam.stage.opacity(0.85))
+                    .padding(20)
+                    .allowsHitTesting(false)
+            }
+            .onHover { inside in
+                if inside { NSCursor.crosshair.push() } else { NSCursor.pop() }
+            }
+        }
+    }
+
+    private func fittedRect(in box: CGRect) -> CGRect {
+        guard let i = model.info, i.width > 0, i.height > 0 else { return box }
+        let aspect = Double(i.width) / Double(i.height)
+        var w = box.width, h = w / aspect
+        if h > box.height { h = box.height; w = h * aspect }
+        return CGRect(x: box.midX - w / 2, y: box.midY - h / 2, width: w, height: h)
     }
 
     /// Zoom is felt exponentially — the jump from 1x to 2x and the jump from

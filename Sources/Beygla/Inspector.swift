@@ -61,6 +61,7 @@ struct Inspector: View {
                             onMoveUp: i > 0 ? { model.moveRule(id, by: -1) } : nil,
                             onMoveDown: i < model.rules.count - 1 ? { model.moveRule(id, by: 1) } : nil) {
                         model.rules.removeAll { $0.id == id }
+                        model.removeTriggers(for: id)
                     }
                 }
             }
@@ -112,18 +113,6 @@ struct Inspector: View {
                         )
                     }
 
-                    HStack(spacing: 8) {
-                        Text("ORDER")
-                            .font(Sungam.mono(Sungam.text2xs))
-                            .tracking(Sungam.text2xs * Sungam.scale * 0.08)
-                            .foregroundStyle(Sungam.ink45)
-                        Selector(options: [(true, "Vectors first"), (false, "Frames first")],
-                                 selection: $model.vectorsFirst, color: Sungam.lilacText)
-                    }
-                    .help(model.vectorsFirst
-                          ? "Vector effects bend the clean picture's motion, then the frame effects rework the result."
-                          : "Frame effects mosh first and are baked into the picture, then the vector effects push that around.")
-
                     if !model.vectorRules.isEmpty {
                         Rectangle().fill(Sungam.ink13).frame(height: Sungam.hairline)
                         Text("IN USE")
@@ -139,6 +128,7 @@ struct Inspector: View {
                                           onMoveDown: i < model.vectorRules.count - 1
                                             ? { model.moveVectorRule(id, by: 1) } : nil) {
                                 model.vectorRules.removeAll { $0.id == id }
+                                model.removeTriggers(for: id)
                             }
                         }
                     }
@@ -152,6 +142,28 @@ struct Inspector: View {
     private var streamPanel: some View {
         PanelFrame(title: "Stream", color: Sungam.steel) {
             VStack(alignment: .leading, spacing: 10) {
+                // Which engine's pass runs first. Steel, the render chain:
+                // this is about the order the passes run in, not about
+                // either family of effect.
+                if !model.vectorEngineMissing {
+                    HStack(spacing: 8) {
+                        Text("ORDER")
+                            .font(Sungam.mono(Sungam.text2xs))
+                            .tracking(Sungam.text2xs * Sungam.scale * 0.08)
+                            .foregroundStyle(Sungam.ink45)
+                        Selector(options: [(false, "Effects first"), (true, "Vectors first")],
+                                 selection: $model.vectorsFirst, color: Sungam.steel)
+                    }
+                    Text(model.vectorsFirst
+                         ? "Vector effects bend the clean motion, then the effects cut up the result."
+                         : "Effects mosh first, then vector effects push the moshed picture around.")
+                        .font(Sungam.mono(Sungam.text2xs))
+                        .foregroundStyle(Sungam.ink45)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    Rectangle().fill(Sungam.ink13).frame(height: Sungam.hairline)
+                }
+
                 Latch(label: "Strip every keyframe",
                       on: $model.moshSettings.purgeAllKeyframes, color: Sungam.steel)
                 Text(model.moshSettings.purgeAllKeyframes && model.smear != nil
@@ -243,18 +255,35 @@ struct RuleRow: View {
                     NumBox(label: "Length", value: $rule.duration, range: 0.03 ... 3.0,
                            color: rule.kind.signalColor, entryScale: 1000,
                            format: { String(format: "%.0fms", $0 * 1000) })
-                    NumBox(label: "Amount", value: $rule.amountFloor,
-                           color: rule.kind.signalColor,
-                           format: { String(format: "%.2f", $0) })
+                    // Hidden where the effect has no "more" to give, rather
+                    // than left as a control that does nothing.
+                    if rule.kind.usesAmount {
+                        NumBox(label: "Amount", value: $rule.amountFloor,
+                               color: rule.kind.signalColor,
+                               format: { String(format: "%.2f", $0) })
+                    } else {
+                        Color.clear.frame(maxWidth: .infinity, maxHeight: 1)
+                    }
                     Color.clear.frame(maxWidth: .infinity, maxHeight: 1)
-                    Color.clear.frame(maxWidth: .infinity, maxHeight: 1)
+                    // Only where something is random: the effect itself, or
+                    // Chance and Jitter rolling for it.
+                    if rule.kind.isRandom || rule.probability < 1 || rule.durationJitter > 0 {
+                        SeedBox(seed: $rule.seed, color: rule.kind.signalColor)
+                    } else {
+                        Color.clear.frame(maxWidth: .infinity, maxHeight: 1)
+                    }
                 }
 
                 // Modulation — violet, and nothing else on the panel is violet.
                 HStack(spacing: 8) {
-                    NumBox(label: "Velocity", value: $rule.strengthInfluence,
-                           color: Sungam.violet,
-                           format: { String(format: "%.2f", $0) })
+                    // Velocity only ever scales Amount.
+                    if rule.kind.usesAmount {
+                        NumBox(label: "Velocity", value: $rule.strengthInfluence,
+                               color: Sungam.violet,
+                               format: { String(format: "%.2f", $0) })
+                    } else {
+                        Color.clear.frame(maxWidth: .infinity, maxHeight: 1)
+                    }
                     NumBox(label: "Chance", value: $rule.probability,
                            color: Sungam.violet,
                            format: { String(format: "%.2f", $0) })
@@ -368,6 +397,7 @@ struct RuleInfo: View {
 /// enough (one edits a picture's motion, the other reorders whole frames)
 /// that collapsing them into one generic would obscure more than it saves.
 struct VectorRuleRow: View {
+    @EnvironmentObject var model: AppModel
     @Binding var rule: VectorRule
     var lastNote: Int?
     var position: Int = 0
@@ -419,17 +449,42 @@ struct VectorRuleRow: View {
                     NumBox(label: "Length", value: $rule.duration, range: 0.03 ... 3.0,
                            color: rule.kind.signalColor, entryScale: 1000,
                            format: { String(format: "%.0fms", $0 * 1000) })
-                    NumBox(label: "Amount", value: $rule.amountFloor,
-                           color: rule.kind.signalColor,
-                           format: { String(format: "%.2f", $0) })
-                    Color.clear.frame(maxWidth: .infinity, maxHeight: 1)
-                    Color.clear.frame(maxWidth: .infinity, maxHeight: 1)
+                    // Hidden where the effect has no "more" to give, rather
+                    // than left as a control that does nothing.
+                    if rule.kind.usesAmount {
+                        NumBox(label: "Amount", value: $rule.amountFloor,
+                               color: rule.kind.signalColor, bipolar: rule.kind.isBipolar,
+                               format: { String(format: "%.2f", $0) })
+                    } else {
+                        Color.clear.frame(maxWidth: .infinity, maxHeight: 1)
+                    }
+                    // Decay fades Amount across the span; for the effects with
+                    // no Amount there is nothing to fade.
+                    if rule.kind.usesAmount {
+                        NumBox(label: "Decay", value: $rule.decay,
+                               color: rule.kind.signalColor,
+                               format: { String(format: "%.2f", $0) })
+                    } else {
+                        Color.clear.frame(maxWidth: .infinity, maxHeight: 1)
+                    }
+                    if rule.kind.isRandom || rule.probability < 1 || rule.durationJitter > 0 {
+                        SeedBox(seed: $rule.seed, color: rule.kind.signalColor)
+                    } else {
+                        Color.clear.frame(maxWidth: .infinity, maxHeight: 1)
+                    }
                 }
 
+                VectorExtras(rule: $rule)
+
                 HStack(spacing: 8) {
-                    NumBox(label: "Velocity", value: $rule.strengthInfluence,
-                           color: Sungam.violet,
-                           format: { String(format: "%.2f", $0) })
+                    // Velocity only ever scales Amount.
+                    if rule.kind.usesAmount {
+                        NumBox(label: "Velocity", value: $rule.strengthInfluence,
+                               color: Sungam.violet,
+                               format: { String(format: "%.2f", $0) })
+                    } else {
+                        Color.clear.frame(maxWidth: .infinity, maxHeight: 1)
+                    }
                     NumBox(label: "Chance", value: $rule.probability,
                            color: Sungam.violet,
                            format: { String(format: "%.2f", $0) })
@@ -568,5 +623,114 @@ struct EffectChip: View {
         .onHover { hover = $0 }
         .onTapGesture(perform: action)
         .help(help)
+    }
+}
+
+// MARK: - Seed
+
+/// An effect's seed, boxed like a NumBox so it sits in the same row. A click
+/// rolls a new one: the same settings, a different variation.
+struct SeedBox: View {
+    @Binding var seed: UInt32
+    var color: Color
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text("SEED")
+                .font(Sungam.mono(Sungam.text2xs))
+                .tracking(Sungam.text2xs * Sungam.scale * 0.06)
+                .foregroundStyle(Sungam.ink55)
+            Text(verbatim: "\(seed)  ↻")
+                .font(Sungam.mono(Sungam.textBase, weight: .bold).monospacedDigit())
+                .foregroundStyle(color)
+                .lineLimit(1)
+                .padding(.horizontal, 6)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(height: 19 * Sungam.scale)
+                .background(Sungam.ink(0.04))
+                .overlay(Rectangle().stroke(Sungam.ink22, lineWidth: Sungam.hairline))
+                .contentShape(Rectangle())
+                .onTapGesture { seed = UInt32.random(in: 1 ... 9999) }
+                .help("Click for a new variation")
+        }
+        .frame(minWidth: 54 * Sungam.scale, maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+// MARK: - Vector effect settings
+
+/// The settings one vector effect has beyond Amount and Decay: an axis for
+/// Mirror and Vibrate, a direction for Shift, a centre for the radial three,
+/// Feedback for Delay, Threshold for Noise. Nothing for the rest.
+struct VectorExtras: View {
+    @EnvironmentObject var model: AppModel
+    @Binding var rule: VectorRule
+
+    var body: some View {
+        let color = rule.kind.signalColor
+        switch rule.kind {
+        case .mirror:
+            labelled("Axis") {
+                Selector(options: [(MotionAxis.horizontal, "Left–right"), (.vertical, "Top–bottom"),
+                                   (.both, "Both")],
+                         selection: $rule.axis, color: color)
+            }
+        case .vibrate:
+            labelled("Axis") {
+                Selector(options: [(MotionAxis.both, "Both"), (.horizontal, "Across"),
+                                   (.vertical, "Up–down")],
+                         selection: $rule.axis, color: color)
+            }
+        case .shift:
+            labelled("Direction") {
+                Selector(options: MotionDirection.allCases.map { ($0, $0.rawValue.capitalized) },
+                         selection: $rule.direction, color: color)
+            }
+        case .zoom, .slamZoom, .shear:
+            HStack(alignment: .bottom, spacing: 8) {
+                NumBox(label: "Centre X", value: $rule.centreX, color: color,
+                       format: { String(format: "%.0f%%", $0 * 100) })
+                NumBox(label: "Centre Y", value: $rule.centreY, color: color,
+                       format: { String(format: "%.0f%%", $0 * 100) })
+                let picking = model.centrePickRule == rule.id
+                LatchButton(label: picking ? "Picking" : "Pick", color: color,
+                            filled: picking) {
+                    model.centrePickRule = picking ? nil : rule.id
+                }
+                .help("Click a point on the picture to pull from there")
+                LatchButton(label: "Middle",
+                            enabled: rule.centreX != 0.5 || rule.centreY != 0.5) {
+                    rule.centreX = 0.5; rule.centreY = 0.5
+                }
+            }
+        case .delay:
+            HStack(spacing: 8) {
+                NumBox(label: "Feedback", value: $rule.feedback, color: color,
+                       format: { String(format: "%.2f", $0) })
+                Color.clear.frame(maxWidth: .infinity, maxHeight: 1)
+                Color.clear.frame(maxWidth: .infinity, maxHeight: 1)
+                Color.clear.frame(maxWidth: .infinity, maxHeight: 1)
+            }
+        case .noise:
+            HStack(spacing: 8) {
+                NumBox(label: "Threshold", value: $rule.threshold, range: 0.05 ... 1, color: color,
+                       format: { String(format: "%.2f", $0) })
+                Color.clear.frame(maxWidth: .infinity, maxHeight: 1)
+                Color.clear.frame(maxWidth: .infinity, maxHeight: 1)
+                Color.clear.frame(maxWidth: .infinity, maxHeight: 1)
+            }
+        default:
+            EmptyView()
+        }
+    }
+
+    private func labelled<C: View>(_ label: String, @ViewBuilder _ content: () -> C) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(label.uppercased())
+                .font(Sungam.mono(Sungam.text2xs))
+                .tracking(Sungam.text2xs * Sungam.scale * 0.06)
+                .foregroundStyle(Sungam.ink55)
+            content()
+        }
     }
 }

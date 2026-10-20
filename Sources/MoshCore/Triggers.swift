@@ -29,15 +29,20 @@ public struct TriggerEvent: Identifiable, Codable, Hashable, Sendable {
     public var note: Int?
     /// Which band detected it, when the event came from audio.
     public var band: OnsetBand?
+    /// The one effect this trigger fires, when it was placed on that effect's
+    /// own lane. Nil means it is a shared trigger, routed by source as usual.
+    public var ruleID: UUID?
 
     public init(id: UUID = UUID(), time: Double, strength: Double = 1.0,
-                source: TriggerSource, note: Int? = nil, band: OnsetBand? = nil) {
+                source: TriggerSource, note: Int? = nil, band: OnsetBand? = nil,
+                ruleID: UUID? = nil) {
         self.id = id
         self.time = time
         self.strength = strength
         self.source = source
         self.note = note
         self.band = band
+        self.ruleID = ruleID
     }
 }
 
@@ -179,13 +184,17 @@ public struct MoshRule: Identifiable, Codable, Hashable, Sendable {
     public var offset: Double
     /// Spans of the timeline where this effect is live. Empty means everywhere.
     public var activeRegions: [ActiveRegion]
+    /// This effect's own random seed: what Shuffle, Jiggle and Blocks
+    /// scramble with, and what Chance and Jitter roll with. Same seed, same
+    /// render; a new seed is a new variation with nothing else changed.
+    public var seed: UInt32
 
     public init(id: UUID = UUID(), enabled: Bool = true, kind: MoshOpKind,
                 source: TriggerSource, note: Int? = nil, band: OnsetBand? = nil,
                 duration: Double = 0.25, durationJitter: Double = 0,
-                amountFloor: Double = 0.4, strengthInfluence: Double = 0.6,
+                amountFloor: Double? = nil, strengthInfluence: Double = 0.6,
                 probability: Double = 1.0, offset: Double = 0,
-                activeRegions: [ActiveRegion] = []) {
+                activeRegions: [ActiveRegion] = [], seed: UInt32 = 1) {
         self.id = id
         self.enabled = enabled
         self.kind = kind
@@ -194,7 +203,8 @@ public struct MoshRule: Identifiable, Codable, Hashable, Sendable {
         self.band = band
         self.duration = duration
         self.durationJitter = durationJitter
-        self.amountFloor = amountFloor
+        self.amountFloor = amountFloor ?? kind.defaultAmount
+        self.seed = seed
         self.strengthInfluence = strengthInfluence
         self.probability = probability
         self.offset = offset
@@ -208,6 +218,9 @@ public struct MoshRule: Identifiable, Codable, Hashable, Sendable {
 
     public func matches(_ event: TriggerEvent) -> Bool {
         guard enabled else { return false }
+        // A trigger placed on one effect's own lane is for that effect alone,
+        // and is not gated by its painted spans: it was put exactly there.
+        if let target = event.ruleID { return target == id }
         // Painted regions gate every source, a hand-placed trigger included: if
         // you drew where an effect is live, a trigger outside it should not
         // wake it up.
@@ -236,6 +249,19 @@ public struct MoshRule: Identifiable, Codable, Hashable, Sendable {
     }
 }
 
+/// How much of an effect's Amount a trigger delivers. A full-strength hit
+/// gets all of it; Velocity sets how far a weaker hit falls short, so at 0 every
+/// hit is the same and at 1 a hit's strength scales the Amount directly.
+///
+/// This used to be `Amount + strength × Velocity`, clamped to 1. With the
+/// default Velocity of 0.6 any full-strength trigger — every hand-placed one,
+/// every accented beat, every strong onset — already reached 1 at Amount 0.4,
+/// so the whole top of the Amount range changed nothing at all.
+public func velocityScale(strength: Double, velocity: Double) -> Double {
+    let s = min(max(strength, 0), 1), v = min(max(velocity, 0), 1)
+    return 1 - v * (1 - s)
+}
+
 public enum TriggerCompiler {
     /// Compile events + rules into the op list the engine consumes.
     ///
@@ -244,11 +270,15 @@ public enum TriggerCompiler {
     public static func compile(events: [TriggerEvent], rules: [MoshRule],
                                frameRate: Double, frameCount: Int,
                                seed: UInt64 = 0x4D05_4842) -> [MoshOp] {
-        var rng = SplitMix64(seed: seed)
+        // One generator per rule, seeded from that rule's own seed, so
+        // changing one effect's seed rerolls only that effect.
+        var rngs: [UUID: SplitMix64] = [:]
         var ops: [MoshOp] = []
 
         for event in events.sorted(by: { $0.time < $1.time }) {
             for (chain, rule) in rules.enumerated() where rule.matches(event) {
+                var rng = rngs[rule.id] ?? SplitMix64(seed: seed ^ (UInt64(rule.seed) &* 0x9E37_79B9_7F4A_7C15))
+                defer { rngs[rule.id] = rng }
                 if rule.probability < 1.0 {
                     let roll = Double(rng.next() % 10_000) / 10_000.0
                     if roll > rule.probability { continue }
@@ -270,8 +300,8 @@ public enum TriggerCompiler {
                 let hi = min(frameCount, end)
                 guard lo < hi else { continue }
 
-                let amount = min(1.0, max(0.0,
-                    rule.amountFloor + event.strength * rule.strengthInfluence))
+                let amount = rule.amountFloor
+                    * velocityScale(strength: event.strength, velocity: rule.strengthInfluence)
 
                 var op = MoshOp(kind: rule.kind, startFrame: lo, length: hi - lo,
                                 amount: amount, seed: rng.next())

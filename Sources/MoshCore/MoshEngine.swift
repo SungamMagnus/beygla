@@ -72,6 +72,37 @@ public enum MoshOpKind: String, Codable, CaseIterable, Identifiable, Sendable {
         }
     }
 
+    /// Whether Amount changes anything. Six effects are all-or-nothing
+    /// operations on the range — there is no "more" of a deleted keyframe or a
+    /// reversed run — so the app hides Amount (and Velocity, which only ever
+    /// scales Amount) for them rather than offer a control that does nothing.
+    public var usesAmount: Bool {
+        switch self {
+        case .bloom, .freeze, .weave: return false
+        default: return true
+        }
+    }
+
+    /// Where Amount starts on a new effect. Glide and Reverse start at full,
+    /// which is what they did before they had an Amount; Invert starts at the
+    /// neighbour swap it always was.
+    public var defaultAmount: Double {
+        switch self {
+        case .glide, .reverse: return 1
+        case .invert: return 0
+        default: return 0.4
+        }
+    }
+
+    /// Effects whose result depends on the seed even with Chance and Jitter
+    /// left alone.
+    public var isRandom: Bool {
+        switch self {
+        case .shuffle, .jiggle, .blockShuffle: return true
+        default: return false
+        }
+    }
+
     /// What the effect does to the bitstream, and what that looks like — one
     /// or two sentences, short enough to sit under the controls.
     ///
@@ -85,13 +116,13 @@ public enum MoshOpKind: String, Codable, CaseIterable, Identifiable, Sendable {
         case .bloom:
             return "Deletes the keyframes in range, so the next scene's motion drags the old scene's pixels around. Strongest on a hard cut."
         case .glide:
-            return "Repeats one delta frame through the range, so the picture keeps sliding one way and smears. Longer ranges drift further."
+            return "Repeats one delta frame through the range, so the picture keeps sliding one way and smears. Lower Amount slides slower, holding between pushes."
         case .echo:
-            return "Loops the first few delta frames, so the image churns in a cycle. Amount sets the loop length."
+            return "Loops the first few delta frames, so the image churns in a cycle. Higher Amount is a tighter, harder loop."
         case .stutter:
-            return "Keeps one frame in every few and holds between them: a hard, rhythmic judder. Amount sets the step."
+            return "Keeps one frame in every few and holds between them: a hard, rhythmic judder. Higher Amount holds longer."
         case .reverse:
-            return "Plays the range's motion backwards over a picture that never resets, so shapes crawl back through themselves."
+            return "Plays the range's motion backwards over a picture that never resets. Lower Amount reverses in short chunks: a stuttering back-and-forth."
         case .shuffle:
             return "Scrambles the delta frames, so blocks tear and drift apart. Seeded, so a project always renders the same."
         case .freeze:
@@ -99,19 +130,19 @@ public enum MoshOpKind: String, Codable, CaseIterable, Identifiable, Sendable {
         case .void:
             return "Drops every frame heavier than a threshold, keyframes first, so the picture drifts instead of cutting. Amount sets the threshold."
         case .invert:
-            return "Swaps each frame with its neighbour, so motion steps forward and back: a fine shudder that keeps its subject."
+            return "Swaps frames in pairs, so motion steps forward and back. At zero it swaps neighbours, a fine shudder; higher swaps frames further apart."
         case .weave:
             return "Alternates the range forwards and backwards, pulling the picture apart and back together every frame."
         case .jiggle:
             return "Nudges each frame a random distance in time, so motion stumbles. Amount sets how far."
         case .overlap:
-            return "Each run of frames replays part of the one before, stacking half-finished movements. Amount sets the run length."
+            return "Each run of frames replays part of the one before, stacking half-finished movements. Higher Amount replays more."
         case .sort:
-            return "Reorders frames by size, which tracks how much changed. Below half builds quiet to loud; above half starts loud and decays."
+            return "Reorders frames loudest-first, by how much changed. Low Amount reshuffles locally; high plays the whole span as one burst that decays."
         case .rise:
-            return "Skips ahead through the range, then holds the last frame it reached. Amount sets the stride."
+            return "Skips ahead through the range, then holds the last frame it reached. Higher Amount leaps further and waits longer."
         case .blockShuffle:
-            return "Shuffles in blocks, so motion stays smooth inside each one and jumps at the joins, like a stutter edit. Amount sets the block length."
+            return "Shuffles in blocks, so motion stays smooth inside each one and jumps at the joins, like a stutter edit. Higher Amount is smaller blocks."
         }
     }
 
@@ -219,13 +250,24 @@ public enum MoshEngine {
 
         case .glide:
             // Source is the last delta frame before the range — that is the
-            // motion we want to keep re-applying.
+            // motion we want to keep re-applying. Amount is speed: at full it
+            // lands on every frame, lower it lands on every 2nd–8th with the
+            // picture held still between, so the slide creeps.
             guard let src = lastDelta(before: lo, in: frames) else { return }
             let payload = MPEG4.strippingHeaders(frames[src].payload)
-            for i in lo ..< hi { frames[i] = AVIFrame(payload: payload) }
+            let every = 1 + Int(((1 - op.amount) * 7).rounded())
+            for (n, i) in (lo ..< hi).enumerated() {
+                frames[i] = n % every == 0 ? AVIFrame(payload: payload) : hold
+            }
 
+        // Amount is scaled to the span's own length throughout. It used to be
+        // a fixed 2–16 frames, but a default 250 ms span is ~7 frames, so the
+        // top half of the range changed nothing — and Blocks, with a block
+        // longer than the span, did nothing at all.
         case .echo:
-            let window = max(1, Int((1.0 + op.amount * 15.0).rounded()))
+            // Higher is a tighter loop: from half the span down to one frame.
+            let n = hi - lo
+            let window = max(1, Int((1.0 + (1.0 - op.amount) * Double(n / 2 - 1)).rounded()))
             var source: [AVIFrame] = []
             var i = lo
             while i < hi && source.count < window {
@@ -238,14 +280,24 @@ public enum MoshEngine {
             }
 
         case .stutter:
-            let step = max(2, Int((2.0 + op.amount * 14.0).rounded()))
+            // From every other frame up to one frame held for the whole span.
+            let step = max(2, Int((2.0 + op.amount * Double(max(0, hi - lo - 2))).rounded()))
             for (n, idx) in (lo ..< hi).enumerated() where n % step != 0 {
                 frames[idx] = hold
             }
 
         case .reverse:
+            // Amount is the chunk reversed: at full the whole span plays
+            // backwards; lower, it reverses in short chunks that each step
+            // forward, a stuttering back-and-forth.
             var slice = Array(frames[lo ..< hi])
-            slice.reverse()
+            let chunk = max(2, Int((2.0 + op.amount * Double(max(0, slice.count - 2))).rounded()))
+            var c = 0
+            while c < slice.count {
+                let end = min(c + chunk, slice.count)
+                slice[c ..< end].reverse()
+                c = end
+            }
             // A keyframe dragged into the middle would snap the picture back, so
             // neutralise any that ended up inside the reversed run.
             for i in slice.indices where slice[i].isKey { slice[i] = hold }
@@ -278,10 +330,13 @@ public enum MoshEngine {
             }
 
         case .invert:
+            // Amount is the swap distance: neighbours at zero, up to frames
+            // half the span apart at full, for bigger jumps.
+            let d = 1 + Int((op.amount * Double(max(0, (hi - lo) / 2 - 1))).rounded())
             var i = lo
-            while i + 1 < hi {
-                frames.swapAt(i, i + 1)
-                i += 2
+            while i + d < hi {
+                for k in 0 ..< d where i + k + d < hi { frames.swapAt(i + k, i + k + d) }
+                i += 2 * d
             }
             for i in lo ..< hi where frames[i].isKey { frames[i] = hold }
 
@@ -300,7 +355,7 @@ public enum MoshEngine {
 
         case .jiggle:
             var rng = SplitMix64(seed: op.seed &+ UInt64(lo))
-            let sigma = 1.0 + op.amount * 12.0
+            let sigma = 0.5 + op.amount * Double(hi - lo) / 2
             let slice = Array(frames[lo ..< hi])
             var out: [AVIFrame] = []
             out.reserveCapacity(slice.count)
@@ -312,8 +367,10 @@ public enum MoshEngine {
             frames.replaceSubrange(lo ..< hi, with: out)
 
         case .overlap:
-            let run = max(2, Int((2.0 + op.amount * 14.0).rounded()))
-            let step = max(1, run / 2)          // step back less than the run
+            // Runs of half the span; Amount sets how far each one steps back,
+            // from barely (nearly the original) to replaying all but a frame.
+            let run = max(3, (hi - lo) / 2)
+            let step = max(1, Int((Double(run) * (1.0 - 0.9 * op.amount)).rounded()))
             let slice = Array(frames[lo ..< hi])
             var out: [AVIFrame] = []
             out.reserveCapacity(slice.count)
@@ -329,16 +386,25 @@ public enum MoshEngine {
             frames.replaceSubrange(lo ..< hi, with: out)
 
         case .sort:
+            // Sorted loudest-first in chunks: Amount grows the chunk from a
+            // couple of frames (local reshuffles) to the whole span (one
+            // burst that decays). It used to pick a direction at 0.5 and
+            // otherwise change nothing.
             var slice = Array(frames[lo ..< hi])
-            let descending = op.amount >= 0.5
-            slice.sort { descending
-                ? $0.payload.count > $1.payload.count
-                : $0.payload.count < $1.payload.count }
+            let chunk = max(2, Int((2.0 + op.amount * Double(max(0, slice.count - 2))).rounded()))
+            var c = 0
+            while c < slice.count {
+                let end = min(c + chunk, slice.count)
+                slice[c ..< end].sort { $0.payload.count > $1.payload.count }
+                c = end
+            }
             for i in slice.indices where slice[i].isKey { slice[i] = hold }
             frames.replaceSubrange(lo ..< hi, with: slice)
 
         case .rise:
-            let stride = max(2, Int((1.0 + op.amount * 8.0).rounded()))
+            // From every other frame up to a leap that reaches the end of the
+            // span at once and waits there.
+            let stride = max(2, Int((2.0 + op.amount * Double(max(0, hi - lo - 2))).rounded()))
             let slice = Array(frames[lo ..< hi])
             var out: [AVIFrame] = []
             out.reserveCapacity(slice.count)
@@ -356,7 +422,9 @@ public enum MoshEngine {
 
         case .blockShuffle:
             var rng = SplitMix64(seed: op.seed &+ UInt64(lo))
-            let block = max(2, Int((2.0 + op.amount * 14.0).rounded()))
+            // Higher is smaller blocks and more broken: from two halves
+            // swapped down to two-frame blocks.
+            let block = max(2, Int((2.0 + (1.0 - op.amount) * Double(max(0, (hi - lo) / 2 - 2))).rounded()))
             let slice = Array(frames[lo ..< hi])
             var blocks: [[AVIFrame]] = []
             var i = 0

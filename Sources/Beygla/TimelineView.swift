@@ -72,9 +72,15 @@ struct TimelineView: View {
     @State private var markerDrag: Marker?
     @State private var hoveringMarker = false
     @State private var paint: (ruleID: UUID, kind: PaintKind, from: Double, to: Double)?
+    /// One of a lane's own triggers being dragged.
+    @State private var triggerDrag: UUID?
 
     private let waveH: Double = 96
     private let rowH: Double = 17
+    /// An open lane: a header strip to click closed, and a body tall enough
+    /// that a trigger's height can stand for its strength.
+    private let openH: Double = 76
+    private let headerH: Double = 16
     private let gap: Double = 10
 
     private var duration: Double { max(model.info?.duration ?? 0, 0.001) }
@@ -83,7 +89,30 @@ struct TimelineView: View {
             + model.vectorRules.filter(\.enabled).map(LaneRule.vector)
     }
     private var laneY: Double { waveH + gap }
-    private var height: Double { laneY + Double(max(lanes.count, 1)) * rowH + 8 }
+
+    /// Each lane's rule, vertical extent and whether it is open — collapsed
+    /// lanes stay one row high, so many effects still fit.
+    private struct LaneSlot {
+        let rule: LaneRule
+        let y: Double
+        let h: Double
+        let open: Bool
+    }
+
+    private var slots: [LaneSlot] {
+        var y = laneY
+        return lanes.map { rule in
+            let open = model.expandedLanes.contains(rule.id)
+            let h = open ? openH : rowH
+            defer { y += h }
+            return LaneSlot(rule: rule, y: y, h: h, open: open)
+        }
+    }
+
+    private var height: Double {
+        let lanesH = slots.reduce(0) { $0 + $1.h }
+        return laneY + max(lanesH, rowH) + 8
+    }
 
     var body: some View {
         GeometryReader { geo in
@@ -120,9 +149,15 @@ struct TimelineView: View {
                     let t = time(at: p.x, width: w)
                     if p.y < laneY {
                         model.addManualTrigger(at: t)
-                    } else if let rule = lane(at: p.y) {
-                        // Double-click inside a span removes it.
-                        switch rule {
+                    } else if let slot = slot(at: p.y) {
+                        // On an open lane, double-clicking one of its own
+                        // triggers deletes it; anywhere else in a lane,
+                        // double-clicking inside a span removes the span.
+                        if slot.open, let id = ownTrigger(at: p, in: slot, width: w) {
+                            model.removeTrigger(id)
+                            return
+                        }
+                        switch slot.rule {
                         case .bitstream(let r): model.removeRegion(from: r.id, at: t)
                         case .vector(let r): model.removeVectorRegion(from: r.id, at: t)
                         }
@@ -130,7 +165,20 @@ struct TimelineView: View {
                 }
                 .onTapGesture(count: 1) { p in
                     if marker(at: p, width: w) != nil { return }
-                    if p.y < laneY { model.seek(to: time(at: p.x, width: w)) }
+                    if p.y < laneY {
+                        model.seek(to: time(at: p.x, width: w))
+                    } else if let slot = slot(at: p.y) {
+                        // A collapsed lane, or an open lane's header strip,
+                        // opens or closes it. A click in an open lane's body
+                        // places a trigger for that effect alone, as strong
+                        // as the click is high.
+                        if !slot.open || Double(p.y) < slot.y + headerH {
+                            model.toggleLane(slot.rule.id)
+                        } else if ownTrigger(at: p, in: slot, width: w) == nil {
+                            model.addTrigger(for: slot.rule.id, at: time(at: p.x, width: w),
+                                             strength: strength(at: p.y, in: slot))
+                        }
+                    }
                 }
                 // A click is a zero-distance drag, so a drag that accepts one
                 // would swallow every tap before either tap gesture saw it.
@@ -151,11 +199,24 @@ struct TimelineView: View {
                                 }
                                 return
                             }
+                            // A drag that starts on one of an open lane's own
+                            // triggers moves it: sideways in time, up and
+                            // down in strength.
+                            if triggerDrag == nil, paint == nil,
+                               let slot = slot(at: g.startLocation.y), slot.open,
+                               let id = ownTrigger(at: g.startLocation, in: slot, width: w) {
+                                triggerDrag = id
+                            }
+                            if let id = triggerDrag, let slot = slot(at: g.startLocation.y) {
+                                model.moveTrigger(id, to: time(at: g.location.x, width: w),
+                                                  strength: strength(at: g.location.y, in: slot))
+                                return
+                            }
                             if let p = paint {
                                 paint = (p.ruleID, p.kind, p.from, time(at: g.location.x, width: w))
                             } else if g.startLocation.y < laneY {
                                 model.seek(to: time(at: g.location.x, width: w))
-                            } else if let rule = lane(at: g.startLocation.y) {
+                            } else if let rule = slot(at: g.startLocation.y)?.rule {
                                 let kind: PaintKind = { if case .vector = rule { return .vector }; return .bitstream }()
                                 paint = (rule.id, kind,
                                          time(at: g.startLocation.x, width: w),
@@ -164,6 +225,7 @@ struct TimelineView: View {
                         }
                         .onEnded { _ in
                             markerDrag = nil
+                            triggerDrag = nil
                             if let p = paint {
                                 switch p.kind {
                                 case .bitstream: model.addRegion(to: p.ruleID, from: p.from, to: p.to)
@@ -246,14 +308,35 @@ struct TimelineView: View {
         return nil
     }
 
-    private func lane(at y: CGFloat) -> LaneRule? {
-        let row = Int((Double(y) - laneY) / rowH)
-        guard row >= 0, row < lanes.count else { return nil }
-        return lanes[row]
+    private func slot(at y: CGFloat) -> LaneSlot? {
+        let y = Double(y)
+        return slots.first { y >= $0.y && y < $0.y + $0.h }
     }
 
-    private func rowRect(_ row: Int, _ size: CGSize) -> CGRect {
-        CGRect(x: 0, y: laneY + Double(row) * rowH, width: size.width, height: rowH - 2)
+    private func laneRect(_ slot: LaneSlot, _ width: Double) -> CGRect {
+        CGRect(x: 0, y: slot.y, width: width, height: slot.h - 2)
+    }
+
+    /// Where an open lane's triggers stand: below the header strip, above
+    /// the bar of rewritten frames along the bottom.
+    private func bodyRect(_ slot: LaneSlot, _ width: Double) -> CGRect {
+        CGRect(x: 0, y: slot.y + headerH, width: width, height: slot.h - headerH - 12)
+    }
+
+    private func strength(at y: CGFloat, in slot: LaneSlot) -> Double {
+        let body = bodyRect(slot, 1)
+        return (body.maxY - Double(y)) / max(body.height, 1)
+    }
+
+    /// The lane's own trigger under a point, if any — a few points of slack
+    /// either side of its stem.
+    private func ownTrigger(at p: CGPoint, in slot: LaneSlot, width: Double) -> UUID? {
+        guard Double(p.y) >= slot.y + headerH else { return nil }
+        return model.events
+            .filter { $0.ruleID == slot.rule.id }
+            .map { ($0.id, abs(x($0.time, width) - Double(p.x))) }
+            .filter { $0.1 <= 5 }
+            .min { $0.1 < $1.1 }?.0
     }
 
     // MARK: Drawing
@@ -327,12 +410,13 @@ struct TimelineView: View {
             return
         }
 
-        for (row, rule) in lanes.enumerated() {
-            let rect = rowRect(row, size)
+        for slot in slots {
+            let rule = slot.rule
+            let rect = laneRect(slot, size.width)
             let color = rule.color
 
             // The lane itself.
-            ctx.fill(Path(rect), with: .color(Sungam.ink.opacity(0.035)))
+            ctx.fill(Path(rect), with: .color(Sungam.ink.opacity(slot.open ? 0.06 : 0.035)))
 
             let live = rule.activeRegions.isEmpty
             if live {
@@ -360,30 +444,84 @@ struct TimelineView: View {
             }
 
             // The frames this rule will actually rewrite, and — when Smear is
-            // set — a faint tail for how long the damage lingers after.
+            // set — a faint tail for how long the damage lingers after. Open,
+            // they run along the lane's foot under the trigger stems.
+            let barY = slot.open ? rect.maxY - 10 : rect.minY + 3
+            let barH = slot.open ? 7.0 : rect.height - 6
             for event in model.events where rule.matches(event) {
                 let x0 = x(event.time + rule.offset, size.width)
                 let x1 = x(event.time + rule.offset + rule.duration, size.width)
                 if let smear = model.smear, smear > 0 {
                     let x2 = x(event.time + rule.offset + rule.duration + smear, size.width)
-                    ctx.fill(Path(CGRect(x: x1, y: rect.minY + 6,
-                                         width: max(1, x2 - x1), height: rect.height - 12)),
+                    ctx.fill(Path(CGRect(x: x1, y: barY + barH * 0.3,
+                                         width: max(1, x2 - x1), height: barH * 0.4)),
                              with: .color(color.opacity(0.28)))
                 }
-                let bar = CGRect(x: x0, y: rect.minY + 3,
-                                 width: max(1.5, x1 - x0), height: rect.height - 6)
+                let bar = CGRect(x: x0, y: barY, width: max(1.5, x1 - x0), height: barH)
                 ctx.fill(Path(bar), with: .color(color))
             }
 
-            ctx.draw(Text(rule.displayName.uppercased() + (live ? "  ALWAYS" : ""))
+            if slot.open { drawOpenLane(ctx, slot: slot, size: size) }
+
+            let own = model.events.filter { $0.ruleID == rule.id }.count
+            let label = (slot.open ? "▾ " : "▸ ") + rule.displayName.uppercased()
+                + (live ? "  ALWAYS" : "") + (own > 0 ? "  \(own) OWN" : "")
+            ctx.draw(Text(label)
+                        .font(Sungam.mono(Sungam.text2xs, weight: slot.open ? .bold : .regular))
+                        .foregroundStyle(slot.open ? Sungam.ink85 : Sungam.ink62),
+                     at: CGPoint(x: 6, y: slot.open ? slot.y + headerH / 2 : rect.midY),
+                     anchor: .leading)
+        }
+    }
+
+    /// An open lane's body: shared triggers that reach this effect as faint
+    /// full-height stems, and the effect's own triggers as solid stems whose
+    /// height is their strength, each topped with a square handle.
+    private func drawOpenLane(_ ctx: GraphicsContext, slot: LaneSlot, size: CGSize) {
+        let body = bodyRect(slot, size.width)
+        let color = slot.rule.color
+
+        var header = Path()
+        header.move(to: CGPoint(x: 0, y: body.minY))
+        header.addLine(to: CGPoint(x: size.width, y: body.minY))
+        ctx.stroke(header, with: .color(Sungam.ink13), lineWidth: Sungam.hairline)
+        var base = Path()
+        base.move(to: CGPoint(x: 0, y: body.maxY))
+        base.addLine(to: CGPoint(x: size.width, y: body.maxY))
+        ctx.stroke(base, with: .color(Sungam.ink22), lineWidth: Sungam.hairline)
+
+        for event in model.events where event.ruleID == nil && slot.rule.matches(event) {
+            let px = x(event.time, size.width)
+            var stem = Path()
+            stem.move(to: CGPoint(x: px, y: body.minY + 2))
+            stem.addLine(to: CGPoint(x: px, y: body.maxY))
+            ctx.stroke(stem, with: .color(Sungam.ink28), lineWidth: Sungam.hairline)
+        }
+
+        for event in model.events where event.ruleID == slot.rule.id {
+            let px = x(event.time, size.width)
+            let top = body.maxY - body.height * event.strength
+            let dragging = event.id == triggerDrag
+            var stem = Path()
+            stem.move(to: CGPoint(x: px, y: top))
+            stem.addLine(to: CGPoint(x: px, y: body.maxY))
+            ctx.stroke(stem, with: .color(color), lineWidth: dragging ? 2 : 1.5)
+            let s: Double = dragging ? 9 : 7
+            ctx.fill(Path(CGRect(x: px - s / 2, y: top - s / 2, width: s, height: s)),
+                     with: .color(color))
+        }
+
+        if !model.events.contains(where: { $0.ruleID == slot.rule.id }) {
+            ctx.draw(Text("Click to place a trigger for this effect — higher is stronger")
                         .font(Sungam.mono(Sungam.text2xs))
-                        .foregroundStyle(Sungam.ink62),
-                     at: CGPoint(x: 6, y: rect.midY), anchor: .leading)
+                        .foregroundStyle(Sungam.ink38),
+                     at: CGPoint(x: size.width / 2, y: body.midY), anchor: .center)
         }
     }
 
     private func drawTriggers(_ ctx: GraphicsContext, size: CGSize) {
-        for event in model.events {
+        // A lane's own triggers are drawn in that lane, not across the top.
+        for event in model.events where event.ruleID == nil {
             let px = x(event.time, size.width)
             // Source is read from the tick's colour: coral for audio, steel for
             // MIDI, teal for the sync grid, plain ink for a hand-placed one.

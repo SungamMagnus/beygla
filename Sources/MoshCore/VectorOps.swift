@@ -20,13 +20,50 @@ import Foundation
 /// exceeds 95"), because the tool they were written for had no other way to
 /// place an effect in time. Beygla already has one — the same trigger, rule
 /// and region machinery that drives `MoshOpKind` — so that scaffolding is
-/// dropped and only the vector transform itself is kept. `Buffer.js`'s
-/// feedback behaviour survives as `delay`'s `feedback` parameter rather than
-/// as a separate effect, since the two scripts differ by one line.
+/// dropped and only the vector transform itself is kept. `Buffer.js` is
+/// folded into `delay` rather than kept as a separate effect.
 public enum VectorOpKind: String, Codable, CaseIterable, Identifiable, Sendable {
     case sink, stop, invertReverse, mirror, vibrate, zoom, slamZoom, shear, delay, shift, noise
 
     public var id: String { rawValue }
+
+    /// Whether Amount changes anything. Stop, Invert and Mirror are fixed
+    /// transforms of the motion field; the app hides Amount and Velocity for
+    /// them rather than offer controls that do nothing.
+    public var usesAmount: Bool {
+        switch self {
+        case .stop, .mirror: return false
+        default: return true
+        }
+    }
+
+    /// Where Amount starts on a new effect. Invert starts fully reversed and
+    /// the radial three start pushing outward — their neutral point is 0.5,
+    /// so the generic default would have made a new Zoom do nothing.
+    public var defaultAmount: Double {
+        switch self {
+        case .invertReverse: return 1
+        case .zoom, .slamZoom, .shear: return 0.8
+        default: return 0.5
+        }
+    }
+
+    /// Effects whose result depends on the seed even with Chance and Jitter
+    /// left alone.
+    public var isRandom: Bool { self == .vibrate }
+
+    /// Mirror and Vibrate choose which axis they work on.
+    public var hasAxis: Bool { self == .mirror || self == .vibrate }
+    /// The radial three pull from a centre point that can be moved.
+    public var hasCentre: Bool { isBipolar }
+
+    /// Neutral at Amount 0.5 and pulling the other way below it.
+    public var isBipolar: Bool {
+        switch self {
+        case .zoom, .slamZoom, .shear: return true
+        default: return false
+        }
+    }
 
     public var displayName: String {
         switch self {
@@ -84,25 +121,39 @@ public enum VectorOpKind: String, Codable, CaseIterable, Identifiable, Sendable 
         case .stop:
             return "Zeroes all motion in the frame: a harder stop than Freeze, because the blocks keep redrawing in place."
         case .invertReverse:
-            return "Flips every motion vector, so right becomes left and up becomes down. The content flows backwards through itself."
+            return "Turns motion around: at full, right becomes left and up becomes down; at half it stops dead; below, it only slows."
         case .mirror:
-            return "Mirrors the motion left to right. Symmetric shots barely change; anything else splits down the middle."
+            return "Mirrors the motion left to right, top to bottom, or both. Symmetric shots barely change; anything else splits along the axis."
         case .vibrate:
-            return "Shakes every block in a random direction each frame, like static over the real motion. Amount sets how far."
+            return "Shakes every block at random each frame, like static over the real motion. Amount sets how far; Axis limits which way."
         case .zoom:
-            return "Adds an outward pull that grows towards the corners, on top of the real motion. Negative amounts pull inward."
+            return "Adds an outward pull from the centre point, on top of the real motion. Below 0.5 it pulls inward."
         case .slamZoom:
             return "Like Zoom, but replaces the real motion with the pull: harder and more mechanical."
         case .shear:
             return "Pushes opposite corners in opposite directions, dragging the picture across itself on a slant."
         case .delay:
-            return "Each block moves the way it did a few frames ago. Feedback turns a hard echo into a trailing one."
+            return "Each block moves the way it did a few frames earlier. Amount sets how far back; Feedback lets older echoes trail in."
         case .shift:
-            return "Motion keeps falling and speeding up, like gravity, so the picture slides downward."
+            return "Motion keeps falling and speeding up, like gravity, so the picture slides the chosen way."
         case .noise:
-            return "Makes the stillest blocks convulse instead of the busiest ones."
+            return "Makes the stillest blocks convulse instead of the busiest ones. Threshold sets how still counts as still."
         }
     }
+}
+
+/// Which way a vector effect works: both axes, across, or up and down.
+public enum MotionAxis: String, Codable, CaseIterable, Identifiable, Sendable {
+    case both, horizontal, vertical
+    public var id: String { rawValue }
+    public var index: Int { Self.allCases.firstIndex(of: self) ?? 0 }
+}
+
+/// Which way Shift's motion falls.
+public enum MotionDirection: String, Codable, CaseIterable, Identifiable, Sendable {
+    case down, up, left, right
+    public var id: String { rawValue }
+    public var index: Int { Self.allCases.firstIndex(of: self) ?? 0 }
 }
 
 /// One vector effect covering a span of frames, at a given amount. Deliberately
@@ -121,6 +172,11 @@ public struct VectorOp: Codable, Identifiable, Hashable, Sendable {
     /// order the effects process the frames in — later ones work on what
     /// earlier ones produced, like a rack.
     public var chain: Int = 0
+    /// The effect's own settings beyond Amount, in the order its script
+    /// function reads them (axis, direction, centre, feedback, threshold).
+    public var params: [Double] = []
+    /// 0...1: how far Amount fades toward nothing by the end of the span.
+    public var decay: Double = 0
 
     public init(id: UUID = UUID(), kind: VectorOpKind, startFrame: Int, length: Int,
                 amount: Double = 0.6, seed: UInt64 = 0x5EED) {
@@ -152,11 +208,30 @@ public struct VectorRule: Identifiable, Codable, Hashable, Sendable {
     public var probability: Double
     public var offset: Double
     public var activeRegions: [ActiveRegion]
+    /// See `MoshRule.seed`. Vibrate shakes with it; Chance and Jitter roll
+    /// with it.
+    public var seed: UInt32 = 1
+    /// 0...1: how far Amount fades toward nothing across the span, so the
+    /// effect dies away instead of switching off at its end.
+    public var decay: Double = 0
+    /// Mirror: which way to reflect. Vibrate: which way to shake.
+    public var axis: MotionAxis = .horizontal
+    /// Shift: which way motion falls.
+    public var direction: MotionDirection = .down
+    /// Zoom, Slam Zoom, Shear: where the pull radiates from, as fractions of
+    /// the frame (0.5, 0.5 is the middle).
+    public var centreX: Double = 0.5
+    public var centreY: Double = 0.5
+    /// Delay: how much of the motion further back trails into the echo.
+    public var feedback: Double = 0
+    /// Noise: how still a block must be, as a fraction of the fastest
+    /// block's speed, before it is thrown around.
+    public var threshold: Double = 0.7
 
     public init(id: UUID = UUID(), enabled: Bool = true, kind: VectorOpKind,
                 source: TriggerSource, note: Int? = nil, band: OnsetBand? = nil,
                 duration: Double = 0.3, durationJitter: Double = 0,
-                amountFloor: Double = 0.5, strengthInfluence: Double = 0.5,
+                amountFloor: Double? = nil, strengthInfluence: Double = 0.5,
                 probability: Double = 1.0, offset: Double = 0,
                 activeRegions: [ActiveRegion] = []) {
         self.id = id
@@ -167,11 +242,26 @@ public struct VectorRule: Identifiable, Codable, Hashable, Sendable {
         self.band = band
         self.duration = duration
         self.durationJitter = durationJitter
-        self.amountFloor = amountFloor
+        self.amountFloor = amountFloor ?? kind.defaultAmount
         self.strengthInfluence = strengthInfluence
         self.probability = probability
         self.offset = offset
         self.activeRegions = activeRegions
+        // Vibrate shakes on both axes by default; Mirror reflects left-right.
+        self.axis = kind == .vibrate ? .both : .horizontal
+    }
+
+    /// The settings the effect's script function reads after Amount, in its
+    /// own order.
+    public var params: [Double] {
+        switch kind {
+        case .mirror, .vibrate: return [Double(axis.index)]
+        case .shift: return [Double(direction.index)]
+        case .zoom, .slamZoom, .shear: return [centreX, centreY]
+        case .delay: return [feedback]
+        case .noise: return [threshold]
+        default: return []
+        }
     }
 
     public func isActive(at time: Double) -> Bool {
@@ -180,6 +270,7 @@ public struct VectorRule: Identifiable, Codable, Hashable, Sendable {
 
     public func matches(_ event: TriggerEvent) -> Bool {
         guard enabled else { return false }
+        if let target = event.ruleID { return target == id }
         guard isActive(at: event.time) else { return false }
         if event.source == .manual { return true }
         guard source == event.source else { return false }
@@ -196,11 +287,14 @@ public enum VectorTriggerCompiler {
     public static func compile(events: [TriggerEvent], rules: [VectorRule],
                                frameRate: Double, frameCount: Int,
                                seed: UInt64 = 0x5645_4354) -> [VectorOp] {
-        var rng = SplitMix64(seed: seed)
+        // One generator per rule — see TriggerCompiler.
+        var rngs: [UUID: SplitMix64] = [:]
         var ops: [VectorOp] = []
 
         for event in events.sorted(by: { $0.time < $1.time }) {
             for (chain, rule) in rules.enumerated() where rule.matches(event) {
+                var rng = rngs[rule.id] ?? SplitMix64(seed: seed ^ (UInt64(rule.seed) &* 0x9E37_79B9_7F4A_7C15))
+                defer { rngs[rule.id] = rng }
                 if rule.probability < 1.0 {
                     let roll = Double(rng.next() % 10_000) / 10_000.0
                     if roll > rule.probability { continue }
@@ -218,12 +312,21 @@ public enum VectorTriggerCompiler {
                 let hi = min(frameCount, end)
                 guard lo < hi else { continue }
 
-                let amount = min(1.0, max(0.0,
-                    rule.amountFloor + event.strength * rule.strengthInfluence))
+                // Bipolar effects (Zoom, Slam Zoom, Shear) are neutral at 0.5,
+                // so a weaker hit scales the distance from the middle rather
+                // than the value itself — otherwise a soft hit on an outward
+                // zoom would flip it into an inward one.
+                let scale = velocityScale(strength: event.strength,
+                                          velocity: rule.strengthInfluence)
+                let amount = rule.kind.isBipolar
+                    ? 0.5 + (rule.amountFloor - 0.5) * scale
+                    : rule.amountFloor * scale
 
                 var op = VectorOp(kind: rule.kind, startFrame: lo, length: hi - lo,
                                   amount: amount, seed: rng.next())
                 op.chain = chain
+                op.params = rule.params
+                op.decay = rule.decay
                 ops.append(op)
             }
         }

@@ -57,6 +57,16 @@ func usage() -> Never {
                                      sink|stop|invertReverse|mirror|vibrate|
                                      zoom|slamZoom|shear|delay|shift|noise
           --vector-dur 0.3           vector effect length in seconds
+          --amount 0.6               every effect's Amount (default 0.4 frame,
+                                     0.5 vector)
+          --velocity 0.6             how much trigger strength scales Amount
+          --seed 7                   every effect's seed
+          --decay 0.8                vector effects fade across their span
+          --axis both|horizontal|vertical   Mirror / Vibrate axis
+          --direction down|up|left|right    Shift direction
+          --centre 0.3,0.6           Zoom / Slam Zoom / Shear centre
+          --feedback 0.6             Delay feedback
+          --threshold 0.5            Noise threshold
           --list-vector-effects      print all vector effects and exit
           --cancel-after 1.5         debug: cancel mid-render, to check that
                                      cancelling actually kills ffmpeg
@@ -152,6 +162,15 @@ do {
         let audioOverride = option("audio").map { URL(fileURLWithPath: $0) }
         let vectorKindRaw = option("vector-effect")
         let vectorDuration = option("vector-dur").flatMap { Double($0) } ?? 0.3
+        let amountOverride = option("amount").flatMap { Double($0) }
+        let velocityOverride = option("velocity").flatMap { Double($0) }
+        let seedOverride = option("seed").flatMap { UInt32($0) }
+        let decay = option("decay").flatMap { Double($0) }
+        let axis = option("axis").flatMap { MotionAxis(rawValue: $0) }
+        let direction = option("direction").flatMap { MotionDirection(rawValue: $0) }
+        let centre = option("centre")?.split(separator: ",").compactMap { Double($0) }
+        let feedback = option("feedback").flatMap { Double($0) }
+        let threshold = option("threshold").flatMap { Double($0) }
         let bpm = option("bpm").flatMap { Double($0) }
         let note = option("note").flatMap { NoteValue(rawValue: $0) } ?? .quarter
         let gridOffset = option("grid-offset").flatMap { Double($0) } ?? 0
@@ -204,10 +223,14 @@ do {
                 .joined(separator: ", "))
         }
 
-        let rules = (chain ?? [kind]).map {
-            MoshRule(kind: $0, source: ruleSource,
-                     band: ruleSource == .audio ? onsetSettings.band : nil,
-                     duration: duration, activeRegions: regions)
+        let rules = (chain ?? [kind]).map { k -> MoshRule in
+            var r = MoshRule(kind: k, source: ruleSource,
+                             band: ruleSource == .audio ? onsetSettings.band : nil,
+                             duration: duration, activeRegions: regions)
+            if let a = amountOverride { r.amountFloor = a }
+            if let v = velocityOverride { r.strengthInfluence = v }
+            if let s = seedOverride { r.seed = s }
+            return r
         }
 
         var request = RenderRequest(input: input, output: output, events: events, rules: rules)
@@ -227,10 +250,20 @@ do {
                 exit(1)
             }
             _ = vKind
-            request.vectorRules = vKinds.map {
-                VectorRule(kind: $0, source: ruleSource,
-                           band: ruleSource == .audio ? onsetSettings.band : nil,
-                           duration: vectorDuration)
+            request.vectorRules = vKinds.map { k -> VectorRule in
+                var r = VectorRule(kind: k, source: ruleSource,
+                                   band: ruleSource == .audio ? onsetSettings.band : nil,
+                                   duration: vectorDuration)
+                if let a = amountOverride { r.amountFloor = a }
+                if let v = velocityOverride { r.strengthInfluence = v }
+                if let s = seedOverride { r.seed = s }
+                if let d = decay { r.decay = d }
+                if let a = axis { r.axis = a }
+                if let d = direction { r.direction = d }
+                if let c = centre, c.count == 2 { r.centreX = c[0]; r.centreY = c[1] }
+                if let f = feedback { r.feedback = f }
+                if let t = threshold { r.threshold = t }
+                return r
             }
         }
         request.quality = quality

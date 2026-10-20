@@ -23,8 +23,20 @@ public enum VectorEngine {
             let lo = max(0, op.startFrame)
             let hi = min(frameCount, op.endFrame)
             guard lo < hi else { continue }
-            let entry = "[\"\(op.kind.rawValue)\",\(op.amount),\(op.seed)]"
-            for i in lo ..< hi { perFrame[i].append(entry) }
+            let params = "[" + op.params.map { String($0) }.joined(separator: ",") + "]"
+            for i in lo ..< hi {
+                // Decay fades Amount toward nothing across the span — toward
+                // the neutral middle for the bipolar effects.
+                let progress = op.length > 1 ? Double(i - op.startFrame) / Double(op.length - 1) : 0
+                let f = 1 - op.decay * progress
+                let amount = op.kind.isBipolar ? 0.5 + (op.amount - 0.5) * f : op.amount * f
+                // The seed goes in as 31 bits. ffedit's QuickJS saturates a
+                // larger number to 2147483647 when it converts it to an
+                // integer, instead of wrapping it, so every full 64-bit
+                // seed became the same one and Vibrate shook every hit in
+                // exactly the same pattern.
+                perFrame[i].append("[\"\(op.kind.rawValue)\",\(amount),\(op.seed & 0x7FFF_FFFF),\(params)]")
+            }
         }
         let tableJS = "[" + perFrame.map { $0.isEmpty ? "null" : "[" + $0.joined(separator: ",") + "]" }
             .joined(separator: ",") + "]"
@@ -35,21 +47,28 @@ public enum VectorEngine {
         \(effectFunctions)
 
         var OPS = \(tableJS);
+        var NEEDS_HISTORY = \(ops.contains { $0.kind == .delay });
+        var HISTORY = [];
         var frameIndex = 0;
 
         export function glitch_frame(frame) {
             let entry = OPS[frameIndex];
             frameIndex++;
-            if (entry === null) return;
 
             let mvs = frame["mv"];
-            if (!mvs) return;
-            let fwd = mvs["forward"];
-            if (!fwd) return;
+            let fwd = mvs ? mvs["forward"] : null;
+            // Delay needs the clip's untouched motion from frames before its
+            // span, so every frame is recorded — but only when a Delay is in
+            // the project, since the copy is not free.
+            if (NEEDS_HISTORY && fwd) {
+                HISTORY.push(copyGrid(fwd));
+                if (HISTORY.length > 64) HISTORY.shift();
+            }
+            if (entry === null || !fwd) return;
 
             for (const op of entry) {
                 let fn = EFFECTS[op[0]];
-                if (fn) fn(fwd, op[1], op[2]);
+                if (fn) fn(fwd, op[1], op[2], op[3]);
             }
 
             // A vector outside the range the frame's own fcode can encode
@@ -89,6 +108,20 @@ public enum VectorEngine {
         };
     }
 
+    // ffedit's vector grid is not a plain array, and a JSON round-trip turns
+    // it into an object keyed "0", "1", … with no length — indexing still
+    // works but anything that reads .length quietly sees nothing. Copy it by
+    // hand into real arrays instead.
+    function copyGrid(fwd) {
+        let out = [];
+        for (let i = 0; i < fwd.length; i++) {
+            let row = fwd[i], r = [];
+            for (let j = 0; j < row.length; j++) r.push([row[j][0], row[j][1]]);
+            out.push(r);
+        }
+        return out;
+    }
+
     function sink(fwd, amount, seed) {
         // Amount 0 -> demanding threshold (only the fastest blocks freeze);
         // amount 1 -> almost everything does.
@@ -110,30 +143,40 @@ public enum VectorEngine {
         }
     }
 
+    // Amount blends from the motion untouched (0), through stopped (0.5),
+    // to fully reversed (1).
     function invertReverse(fwd, amount, seed) {
+        let m = 1 - 2 * amount;
         for (let i = 0; i < fwd.length; i++) {
             let row = fwd[i];
             for (let j = 0; j < row.length; j++) {
                 let mv = row[j];
-                mv[0] = -mv[0]; mv[1] = -mv[1];
+                mv[0] = Math.round(mv[0] * m); mv[1] = Math.round(mv[1] * m);
             }
         }
     }
 
-    function mirror(fwd, amount, seed) {
-        let copy = JSON.parse(JSON.stringify(fwd));
-        for (let i = 0; i < fwd.length; i++) {
-            let row = fwd[i], src = copy[i];
-            let w = row.length;
+    // p[0] is the axis: 0 both (a half turn), 1 left-right, 2 top-bottom.
+    function mirror(fwd, amount, seed, p) {
+        let axis = p[0] | 0;
+        let flipX = axis !== 2, flipY = axis !== 1;
+        let copy = copyGrid(fwd);
+        let h = fwd.length;
+        for (let i = 0; i < h; i++) {
+            let row = fwd[i], w = row.length;
+            let src = copy[flipY ? (h - 1) - i : i];
             for (let j = 0; j < w; j++) {
-                let s = src[(w - 1) - j];
-                row[j][0] = -s[0];
-                row[j][1] = s[1];
+                let s = src[flipX ? (w - 1) - j : j];
+                if (!s) continue;
+                row[j][0] = flipX ? -s[0] : s[0];
+                row[j][1] = flipY ? -s[1] : s[1];
             }
         }
     }
 
-    function vibrate(fwd, amount, seed) {
+    // p[0] is the axis: 0 both, 1 across only, 2 up and down only.
+    function vibrate(fwd, amount, seed, p) {
+        let axis = p[0] | 0;
         let next = rng(seed >>> 0);
         let range = 2 + amount * 30;
         let bias = range / 2;
@@ -141,68 +184,78 @@ public enum VectorEngine {
             let row = fwd[i];
             for (let j = 0; j < row.length; j++) {
                 let mv = row[j];
-                mv[0] += Math.floor(next() * range - bias);
-                mv[1] += Math.floor(next() * range - bias);
+                let dx = Math.floor(next() * range - bias);
+                let dy = Math.floor(next() * range - bias);
+                if (axis !== 2) mv[0] += dx;
+                if (axis !== 1) mv[1] += dy;
             }
         }
     }
 
     // Shared by zoom, slamZoom and shear: a field that varies with distance
     // from the frame's centre.
-    function radial(fwd, amount, seed, replace, diagonal) {
+    // p is the centre, as fractions of the frame. Distance is still measured
+    // against the half-frame, so an off-centre point pushes its far side
+    // harder than its near one.
+    function radial(fwd, amount, seed, p, replace, diagonal) {
         let h = fwd.length, w = fwd[0] ? fwd[0].length : 0;
         if (w === 0) return;
-        let cy = h / 2, cx = w / 2;
-        // Bipolar around amount=0.5 so the low half of the knob pulls inward
-        // and the high half pushes outward; clamped against the frame's own
-        // fcode range afterward, so this can be pushed hard without risking
-        // the macroblock corruption an unclamped value would cause.
-        let strength = amount * 90 - 45;
+        let cx = w * (p[0] === undefined ? 0.5 : p[0]);
+        let cy = h * (p[1] === undefined ? 0.5 : p[1]);
+        let hx = Math.max(w / 2, 1), hy = Math.max(h / 2, 1);
+        // Bipolar around amount=0.5 so the low half pulls inward and the high
+        // half pushes outward. Distance is measured as a fraction of the
+        // frame's half-width, so the edge gets the full push whatever the
+        // resolution — it used to divide by a fixed 100 blocks, which on a
+        // 480-wide clip (30 blocks) capped the edge at about 3 px a frame.
+        // Clamped against the frame's own fcode range afterward, so this can
+        // be pushed hard without the corruption an unclamped value causes.
+        let strength = (amount * 2 - 1) * 28;
         for (let i = 0; i < h; i++) {
             let row = fwd[i];
             for (let j = 0; j < w; j++) {
                 let mv = row[j];
                 let dx, dy;
                 if (diagonal) {
-                    dx = ((i - cx) / 100) * strength;
-                    dy = ((j - cy) / 100) * strength;
+                    dx = ((i - cy) / hy) * strength;
+                    dy = ((j - cx) / hx) * strength;
                 } else {
-                    dx = ((cx - j) / 100) * strength;
-                    dy = ((cy - i) / 100) * strength;
+                    dx = ((cx - j) / hx) * strength;
+                    dy = ((cy - i) / hy) * strength;
                 }
                 if (replace) { mv[0] = dx; mv[1] = dy; }
                 else { mv[0] += dx; mv[1] += dy; }
             }
         }
     }
-    function zoom(fwd, amount, seed) { radial(fwd, amount, seed, false, false); }
-    function slamZoom(fwd, amount, seed) { radial(fwd, amount, seed, true, false); }
-    function shear(fwd, amount, seed) { radial(fwd, amount, seed, false, true); }
+    function zoom(fwd, amount, seed, p) { radial(fwd, amount, seed, p, false, false); }
+    function slamZoom(fwd, amount, seed, p) { radial(fwd, amount, seed, p, true, false); }
+    function shear(fwd, amount, seed, p) { radial(fwd, amount, seed, p, false, true); }
 
-    // Delay keeps its own ring buffer per delay length. Frames before the
-    // buffer fills pass through untouched — there is nothing to delay from
-    // yet — rather than showing a false, empty vector field.
-    var delayBuffers = {};
-    function delay(fwd, amount, seed) {
-        let length = Math.max(2, Math.round(2 + amount * 28));
-        let feedback = amount > 0.5 ? (amount - 0.5) * 2 : 0;
-        let key = String(seed);
-        let buf = delayBuffers[key];
-        if (!buf) { buf = []; delayBuffers[key] = buf; }
-
-        let copy = JSON.parse(JSON.stringify(fwd));
-        buf.push(copy);
-        if (buf.length > length) buf.shift();
-        if (buf.length < length) return; // not warmed up yet
-
-        let past = buf[0];
-        for (let i = 0; i < fwd.length; i++) {
+    // Delay reads the clip's own motion from a few frames back, out of a
+    // history every frame is recorded into (see glitch_frame). It used to keep
+    // a buffer per effect instance that only filled while the effect was
+    // running, and waited for 2–30 frames before doing anything — longer than
+    // a default span, so it usually never started.
+    // p[0] is feedback: echoes from two, three and four times as far back
+    // are added in at feedback, feedback², feedback³, so the echo trails
+    // rather than cutting hard — what Buffer.js did.
+    function delay(fwd, amount, seed, p) {
+        let back = Math.max(1, Math.round(1 + amount * 11));
+        let fb = p[0] || 0;
+        let past = HISTORY[HISTORY.length - 1 - back];
+        if (!past) return;
+        let taps = [];
+        for (let k = 2, g = fb; k <= 4 && fb > 0; k++, g *= fb) {
+            let t = HISTORY[HISTORY.length - 1 - back * k];
+            if (t) taps.push([t, g]);
+        }
+        for (let i = 0; i < fwd.length && i < past.length; i++) {
             let row = fwd[i], prow = past[i];
-            for (let j = 0; j < row.length; j++) {
-                let mv = row[j], pmv = prow[j];
-                let x = mv[0], y = mv[1];
-                mv[0] = pmv[0]; mv[1] = pmv[1];
-                if (feedback > 0) { pmv[0] = pmv[0] * feedback + x; pmv[1] = pmv[1] * feedback + y; }
+            for (let j = 0; j < row.length && j < prow.length; j++) {
+                let x = prow[j][0], y = prow[j][1];
+                for (const [t, g] of taps) { x += t[i][j][0] * g; y += t[i][j][1] * g; }
+                row[j][0] = Math.round(x); row[j][1] = Math.round(y);
             }
         }
     }
@@ -211,8 +264,11 @@ public enum VectorEngine {
     // gravity keeps adding to a falling object's speed rather than resetting
     // it each frame.
     var shiftCarry = {};
-    function shift(fwd, amount, seed) {
-        let g = amount * 6;
+    // p[0] is the direction: 0 down, 1 up, 2 left, 3 right.
+    function shift(fwd, amount, seed, p) {
+        let dir = p[0] | 0;
+        let c = dir >= 2 ? 0 : 1;
+        let g = amount * 10 * (dir === 1 || dir === 2 ? -1 : 1);
         let key = String(seed);
         let carry = shiftCarry[key];
         if (!carry) {
@@ -224,14 +280,16 @@ public enum VectorEngine {
             let row = fwd[i], crow = carry[i];
             for (let j = 0; j < row.length; j++) {
                 let mv = row[j];
-                let next = mv[1];
-                mv[1] = crow[j];
+                let next = mv[c];
+                mv[c] = crow[j];
                 crow[j] = next + crow[j] + g;
             }
         }
     }
 
-    function noise(fwd, amount, seed) {
+    // p[0] is the threshold: a block slower than this fraction of the
+    // fastest block's speed counts as still.
+    function noise(fwd, amount, seed, p) {
         let largest = 0;
         for (let i = 0; i < fwd.length; i++) {
             let row = fwd[i];
@@ -242,7 +300,8 @@ public enum VectorEngine {
             }
         }
         if (largest === 0) return;
-        let cutoff = largest * 0.5;
+        let t = p[0] === undefined ? 0.5 : p[0];
+        let cutoff = largest * t * t;
         let multiple = 2 + amount * 18;
         for (let i = 0; i < fwd.length; i++) {
             let row = fwd[i];
