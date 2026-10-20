@@ -125,7 +125,9 @@ public enum VectorEngine {
     function sink(fwd, amount, seed) {
         // Amount 0 -> demanding threshold (only the fastest blocks freeze);
         // amount 1 -> almost everything does.
-        let threshold = 14 * (1 - amount) + 0.5;
+        // Eased: at zero only blocks faster than ~20 px a frame freeze,
+        // which almost nothing is; at full nearly everything does.
+        let threshold = 40 * (1 - amount) * (1 - amount) + 0.5;
         let t2 = threshold * threshold;
         for (let i = 0; i < fwd.length; i++) {
             let row = fwd[i];
@@ -178,14 +180,18 @@ public enum VectorEngine {
     function vibrate(fwd, amount, seed, p) {
         let axis = p[0] | 0;
         let next = rng(seed >>> 0);
-        let range = 2 + amount * 30;
+        // Eased from no shake at zero to ±16 half-pels at full. Steep at
+        // the bottom: even a one-step shake each frame adds up to drift.
+        let range = 32 * amount * amount;
         let bias = range / 2;
         for (let i = 0; i < fwd.length; i++) {
             let row = fwd[i];
             for (let j = 0; j < row.length; j++) {
                 let mv = row[j];
-                let dx = Math.floor(next() * range - bias);
-                let dy = Math.floor(next() * range - bias);
+                // Rounded, not floored: floor turned even a tiny shake into
+                // a one-step shove on half the blocks.
+                let dx = Math.round(next() * range - bias);
+                let dy = Math.round(next() * range - bias);
                 if (axis !== 2) mv[0] += dx;
                 if (axis !== 1) mv[1] += dy;
             }

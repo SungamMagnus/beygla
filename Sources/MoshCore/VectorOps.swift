@@ -177,6 +177,8 @@ public struct VectorOp: Codable, Identifiable, Hashable, Sendable {
     public var params: [Double] = []
     /// 0...1: how far Amount fades toward nothing by the end of the span.
     public var decay: Double = 0
+    /// A clean keyframe is forced where this op ends.
+    public var resetAfter: Bool = false
 
     public init(id: UUID = UUID(), kind: VectorOpKind, startFrame: Int, length: Int,
                 amount: Double = 0.6, seed: UInt64 = 0x5EED) {
@@ -227,6 +229,19 @@ public struct VectorRule: Identifiable, Codable, Hashable, Sendable {
     /// Noise: how still a block must be, as a fraction of the fastest
     /// block's speed, before it is thrown around.
     public var threshold: Double = 0.7
+    /// See `MoshRule`.
+    public var resetAfter: Bool = false
+    public var spanOverrides: [Int: Double] = [:]
+    public var excludedTriggers: Set<Int> = []
+
+    public func duration(for event: TriggerEvent) -> Double {
+        if event.ruleID == id { return event.duration ?? duration }
+        return spanOverrides[triggerKey(event.time)] ?? duration
+    }
+
+    public func hasOwnLength(_ event: TriggerEvent) -> Bool {
+        event.ruleID == id ? event.duration != nil : spanOverrides[triggerKey(event.time)] != nil
+    }
 
     public init(id: UUID = UUID(), enabled: Bool = true, kind: VectorOpKind,
                 source: TriggerSource, note: Int? = nil, band: OnsetBand? = nil,
@@ -271,6 +286,7 @@ public struct VectorRule: Identifiable, Codable, Hashable, Sendable {
     public func matches(_ event: TriggerEvent) -> Bool {
         guard enabled else { return false }
         if let target = event.ruleID { return target == id }
+        if excludedTriggers.contains(triggerKey(event.time)) { return false }
         guard isActive(at: event.time) else { return false }
         if event.source == .manual { return true }
         guard source == event.source else { return false }
@@ -300,8 +316,8 @@ public enum VectorTriggerCompiler {
                     if roll > rule.probability { continue }
                 }
 
-                var duration = rule.duration
-                if rule.durationJitter > 0 {
+                var duration = rule.duration(for: event)
+                if rule.durationJitter > 0 && !rule.hasOwnLength(event) {
                     let j = (Double(rng.next() % 2_000) / 1_000.0 - 1.0) * rule.durationJitter
                     duration *= max(0.1, 1.0 + j)
                 }
@@ -327,6 +343,7 @@ public enum VectorTriggerCompiler {
                 op.chain = chain
                 op.params = rule.params
                 op.decay = rule.decay
+                op.resetAfter = rule.resetAfter
                 ops.append(op)
             }
         }

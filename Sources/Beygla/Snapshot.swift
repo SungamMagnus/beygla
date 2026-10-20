@@ -24,15 +24,19 @@ enum Snapshot {
 
         model.rules = [
             MoshRule(kind: .bloom, source: .audio, band: .low, duration: 0.5),
-            MoshRule(kind: .stutter, source: .audio, band: .low, duration: 0.25,
-                     activeRegions: [ActiveRegion(start: 3.6, end: 7.5)]),
-            MoshRule(kind: .glide, source: .audio, band: .low, duration: 0.3,
-                     activeRegions: [ActiveRegion(start: 0.5, end: 3.4)]),
+            MoshRule(kind: .stutter, source: .audio, band: .low, duration: 0.25),
+            MoshRule(kind: .glide, source: .audio, band: .low, duration: 0.3),
         ]
         if !model.vectorEngineMissing {
             model.vectorRules = [VectorRule(kind: .zoom, source: .audio, band: .low, duration: 0.4)]
         }
         model.smear = 0.8
+        // Show the two timeline features: Stutter cuts back to the clean
+        // picture after each span, and one Bloom bar has its own length.
+        model.rules[1].resetAfter = true
+        if let e = model.events.first(where: { $0.time > 2 && $0.time < 4 }) {
+            model.setSpanLength(1.0, for: e, on: model.rules[0].id)
+        }
         model.inPoint = 0.8
         model.outPoint = 7.2
 

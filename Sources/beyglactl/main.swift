@@ -67,6 +67,8 @@ func usage() -> Never {
           --centre 0.3,0.6           Zoom / Slam Zoom / Shear centre
           --feedback 0.6             Delay feedback
           --threshold 0.5            Noise threshold
+          --reset                    every effect resets the picture when
+                                     its span ends
           --list-vector-effects      print all vector effects and exit
           --cancel-after 1.5         debug: cancel mid-render, to check that
                                      cancelling actually kills ffmpeg
@@ -171,6 +173,7 @@ do {
         let centre = option("centre")?.split(separator: ",").compactMap { Double($0) }
         let feedback = option("feedback").flatMap { Double($0) }
         let threshold = option("threshold").flatMap { Double($0) }
+        let resetAfter = flag("reset")
         let bpm = option("bpm").flatMap { Double($0) }
         let note = option("note").flatMap { NoteValue(rawValue: $0) } ?? .quarter
         let gridOffset = option("grid-offset").flatMap { Double($0) } ?? 0
@@ -230,6 +233,7 @@ do {
             if let a = amountOverride { r.amountFloor = a }
             if let v = velocityOverride { r.strengthInfluence = v }
             if let s = seedOverride { r.seed = s }
+            r.resetAfter = resetAfter
             return r
         }
 
@@ -263,6 +267,7 @@ do {
                 if let c = centre, c.count == 2 { r.centreX = c[0]; r.centreY = c[1] }
                 if let f = feedback { r.feedback = f }
                 if let t = threshold { r.threshold = t }
+                r.resetAfter = resetAfter
                 return r
             }
         }

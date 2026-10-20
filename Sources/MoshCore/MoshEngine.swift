@@ -116,7 +116,7 @@ public enum MoshOpKind: String, Codable, CaseIterable, Identifiable, Sendable {
         case .bloom:
             return "Deletes the keyframes in range, so the next scene's motion drags the old scene's pixels around. Strongest on a hard cut."
         case .glide:
-            return "Repeats one delta frame through the range, so the picture keeps sliding one way and smears. Lower Amount slides slower, holding between pushes."
+            return "Repeats one delta frame through the range, so the picture keeps sliding one way and smears. Lower Amount gives fewer frames the held motion, down to none."
         case .echo:
             return "Loops the first few delta frames, so the image churns in a cycle. Higher Amount is a tighter, harder loop."
         case .stutter:
@@ -142,7 +142,7 @@ public enum MoshOpKind: String, Codable, CaseIterable, Identifiable, Sendable {
         case .rise:
             return "Skips ahead through the range, then holds the last frame it reached. Higher Amount leaps further and waits longer."
         case .blockShuffle:
-            return "Shuffles in blocks, so motion stays smooth inside each one and jumps at the joins, like a stutter edit. Higher Amount is smaller blocks."
+            return "Shuffles in blocks, so motion stays smooth inside each one and jumps at the joins, like a stutter edit. Higher Amount moves more blocks."
         }
     }
 
@@ -184,6 +184,8 @@ public struct MoshOp: Codable, Identifiable, Hashable, Sendable {
     /// order the effects process the frames in — later ones work on what
     /// earlier ones produced, like a rack.
     public var chain: Int = 0
+    /// A clean keyframe is forced where this op ends.
+    public var resetAfter: Bool = false
 
     public init(id: UUID = UUID(), kind: MoshOpKind, startFrame: Int, length: Int,
                 amount: Double = 0.7, seed: UInt64 = 0x5EED) {
@@ -250,14 +252,18 @@ public enum MoshEngine {
 
         case .glide:
             // Source is the last delta frame before the range — that is the
-            // motion we want to keep re-applying. Amount is speed: at full it
-            // lands on every frame, lower it lands on every 2nd–8th with the
-            // picture held still between, so the slide creeps.
-            guard let src = lastDelta(before: lo, in: frames) else { return }
+            // motion we want to keep re-applying.
+            //
+            // Amount is how many of the span's frames get the held
+            // motion, spread evenly; the rest keep their own. At zero nothing
+            // changes, at full every frame slides, as Glide always did. It
+            // used to hold the picture still between pushes, which at low
+            // Amount read as a freeze rather than as a gentle slide.
+            guard op.amount > 0.001, let src = lastDelta(before: lo, in: frames) else { return }
             let payload = MPEG4.strippingHeaders(frames[src].payload)
-            let every = 1 + Int(((1 - op.amount) * 7).rounded())
-            for (n, i) in (lo ..< hi).enumerated() {
-                frames[i] = n % every == 0 ? AVIFrame(payload: payload) : hold
+            for (n, i) in (lo ..< hi).enumerated()
+            where Int(Double(n + 1) * op.amount) > Int(Double(n) * op.amount) {
+                frames[i] = AVIFrame(payload: payload)
             }
 
         // Amount is scaled to the span's own length throughout. It used to be
@@ -265,19 +271,13 @@ public enum MoshEngine {
         // top half of the range changed nothing — and Blocks, with a block
         // longer than the span, did nothing at all.
         case .echo:
-            // Higher is a tighter loop: from half the span down to one frame.
+            // Higher is a tighter loop: from the whole span (which plays as
+            // it was) down to one frame repeated, eased so the low end stays
+            // a gentle repeat.
             let n = hi - lo
-            let window = max(1, Int((1.0 + (1.0 - op.amount) * Double(n / 2 - 1)).rounded()))
-            var source: [AVIFrame] = []
-            var i = lo
-            while i < hi && source.count < window {
-                if frames[i].isDelta { source.append(frames[i]) }
-                i += 1
-            }
-            guard !source.isEmpty else { return }
-            for (n, idx) in (lo ..< hi).enumerated() {
-                frames[idx] = source[n % source.count]
-            }
+            let ease = (1.0 - op.amount) * (1.0 - op.amount)
+            let window = max(1, Int((1.0 + ease * Double(n - 1)).rounded()))
+            remap((0 ..< n).map { $0 % window }, lo: lo, hi: hi, hold: hold, frames: &frames)
 
         case .stutter:
             // From every other frame up to one frame held for the whole span.
@@ -354,17 +354,14 @@ public enum MoshEngine {
             frames.replaceSubrange(lo ..< hi, with: woven)
 
         case .jiggle:
+            // Eased, so low Amounts nudge the odd frame by one and zero
+            // leaves the span alone.
             var rng = SplitMix64(seed: op.seed &+ UInt64(lo))
-            let sigma = 0.5 + op.amount * Double(hi - lo) / 2
-            let slice = Array(frames[lo ..< hi])
-            var out: [AVIFrame] = []
-            out.reserveCapacity(slice.count)
-            for i in slice.indices {
-                let target = i + Int(gaussian(&rng, sigma: sigma).rounded())
-                out.append(slice[min(max(target, 0), slice.count - 1)])
-            }
-            for i in out.indices where out[i].isKey { out[i] = hold }
-            frames.replaceSubrange(lo ..< hi, with: out)
+            let n = hi - lo
+            let sigma = pow(op.amount, 1.5) * Double(n) / 2
+            remap((0 ..< n).map { i in
+                min(max(i + Int(gaussian(&rng, sigma: sigma).rounded()), 0), n - 1)
+            }, lo: lo, hi: hi, hold: hold, frames: &frames)
 
         case .overlap:
             // Runs of half the span; Amount sets how far each one steps back,
@@ -421,28 +418,48 @@ public enum MoshEngine {
             frames.replaceSubrange(lo ..< hi, with: out)
 
         case .blockShuffle:
+            // Blocks a sixth of the span long; Amount is how many of them
+            // move, from two traded places up to all of them. Zero leaves the
+            // span alone; it used to swap the two halves.
             var rng = SplitMix64(seed: op.seed &+ UInt64(lo))
-            // Higher is smaller blocks and more broken: from two halves
-            // swapped down to two-frame blocks.
-            let block = max(2, Int((2.0 + (1.0 - op.amount) * Double(max(0, (hi - lo) / 2 - 2))).rounded()))
-            let slice = Array(frames[lo ..< hi])
-            var blocks: [[AVIFrame]] = []
-            var i = 0
-            while i < slice.count {
-                blocks.append(Array(slice[i ..< min(i + block, slice.count)]))
-                i += block
-            }
+            let n = hi - lo
+            let block = max(2, n / 6)
+            var blocks: [[Int]] = stride(from: 0, to: n, by: block).map { Array($0 ..< min($0 + block, n)) }
             guard blocks.count > 1 else { return }
-            // Fisher-Yates over the blocks, so motion inside one stays intact
-            // and only the joins are wrong.
-            for n in stride(from: blocks.count - 1, to: 0, by: -1) {
-                blocks.swapAt(n, Int(rng.next() % UInt64(n + 1)))
+            // Motion inside a block stays intact; only the joins are wrong.
+            // The first block stays put: it holds the trigger's keyframe, and
+            // moving it smears like a Bloom — a different effect, and a jump
+            // far bigger than any step of Amount.
+            let first = 1
+            let movable = blocks.count - first
+            guard movable > 1, op.amount > 0.05 else { return }
+            // Pick k distinct blocks and rotate them one place, so every one
+            // picked really moves and k follows Amount. Random pair swaps,
+            // as this first did, could undo each other.
+            let k = min(movable, max(2, Int((op.amount * Double(movable)).rounded())))
+            var pool = Array(first ..< blocks.count)
+            for n in 0 ..< k {
+                pool.swapAt(n, n + Int(rng.next() % UInt64(pool.count - n)))
             }
-            var out = Array(blocks.joined())
-            while out.count < slice.count { out.append(hold) }
-            out = Array(out.prefix(slice.count))
-            for i in out.indices where out[i].isKey { out[i] = hold }
-            frames.replaceSubrange(lo ..< hi, with: out)
+            let picked = pool.prefix(k).sorted()
+            let moved = picked.map { blocks[$0] }
+            for (n, slot) in picked.enumerated() { blocks[slot] = moved[(n + 1) % k] }
+            remap(Array(blocks.joined()), lo: lo, hi: hi, hold: hold, frames: &frames)
+        }
+    }
+
+    /// Rewrite `lo..<hi` from a list of where each slot's frame comes from
+    /// (offsets into the span). A keyframe is neutralised only if it moved —
+    /// left where it was, it snaps nothing back. Neutralising every keyframe
+    /// in the span, as these effects used to, smeared the picture even when
+    /// the effect itself changed nothing, which is why their lowest Amounts
+    /// were never subtle.
+    private static func remap(_ order: [Int], lo: Int, hi: Int, hold: AVIFrame,
+                              frames: inout [AVIFrame]) {
+        let slice = Array(frames[lo ..< hi])
+        for (k, src) in order.prefix(slice.count).enumerated() {
+            let f = slice[src]
+            frames[lo + k] = f.isKey && src != k ? hold : f
         }
     }
 

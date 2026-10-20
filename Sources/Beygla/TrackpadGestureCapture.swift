@@ -19,12 +19,16 @@ struct TrackpadGestureCapture<Content: View>: NSViewRepresentable {
     /// Horizontal scroll delta in points, positive is a swipe that should
     /// reveal content to the right (matches `NSEvent.scrollingDeltaX`).
     var onPanX: (_ deltaX: Double) -> Void
+    /// The items for a context menu at this point (top-left origin, in the
+    /// view's own coordinates); an empty list shows no menu.
+    var onRightClick: (_ point: CGPoint) -> [(title: String, action: () -> Void)] = { _ in [] }
     @ViewBuilder var content: () -> Content
 
     func makeNSView(context: Context) -> CaptureView {
         let v = CaptureView()
         v.onMagnify = onMagnify
         v.onPanX = onPanX
+        v.onRightClick = onRightClick
         let hosting = NSHostingView(rootView: content())
         hosting.translatesAutoresizingMaskIntoConstraints = false
         v.addSubview(hosting)
@@ -41,13 +45,33 @@ struct TrackpadGestureCapture<Content: View>: NSViewRepresentable {
     func updateNSView(_ v: CaptureView, context: Context) {
         v.onMagnify = onMagnify
         v.onPanX = onPanX
+        v.onRightClick = onRightClick
         v.hostingView?.rootView = content()
     }
 
     final class CaptureView: NSView {
         var onMagnify: ((Double, Double) -> Void)?
         var onPanX: ((Double) -> Void)?
+        var onRightClick: ((CGPoint) -> [(title: String, action: () -> Void)])?
         var hostingView: NSHostingView<Content>?
+
+        // Top-left origin, to match the SwiftUI coordinates the timeline
+        // draws and hit-tests in.
+        override var isFlipped: Bool { true }
+
+        // A right-click is not claimed by the hosted SwiftUI content, so it
+        // reaches here the same way pinch and scroll do.
+        override func rightMouseDown(with event: NSEvent) {
+            let p = convert(event.locationInWindow, from: nil)
+            let items = onRightClick?(p) ?? []
+            guard !items.isEmpty else { super.rightMouseDown(with: event); return }
+            let menu = NSMenu()
+            for item in items {
+                if item.title == "-" { menu.addItem(.separator()); continue }
+                menu.addItem(ClosureMenuItem(title: item.title, handler: item.action))
+            }
+            NSMenu.popUpContextMenu(menu, with: event, for: self)
+        }
 
         override func magnify(with event: NSEvent) {
             let local = convert(event.locationInWindow, from: nil)

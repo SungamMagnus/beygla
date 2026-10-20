@@ -32,6 +32,10 @@ public struct TriggerEvent: Identifiable, Codable, Hashable, Sendable {
     /// The one effect this trigger fires, when it was placed on that effect's
     /// own lane. Nil means it is a shared trigger, routed by source as usual.
     public var ruleID: UUID?
+    /// How long this one trigger's effect lasts, when its bar was dragged to
+    /// a length of its own. Only for a lane's own triggers; a shared
+    /// trigger's length per effect lives on the rule (`spanOverrides`).
+    public var duration: Double?
 
     public init(id: UUID = UUID(), time: Double, strength: Double = 1.0,
                 source: TriggerSource, note: Int? = nil, band: OnsetBand? = nil,
@@ -77,6 +81,13 @@ public enum NoteValue: String, Codable, CaseIterable, Identifiable, Sendable {
         }
     }
 }
+
+/// A trigger's identity for per-effect settings that must survive the
+/// trigger list being rebuilt. Analysed onsets and the sync grid are
+/// regenerated with fresh IDs whenever detection settings change, so a
+/// length or exclusion keyed by ID would vanish on the next slider nudge;
+/// keyed by time, to the millisecond, it stays with the hit.
+public func triggerKey(_ time: Double) -> Int { Int((time * 1000).rounded()) }
 
 /// A fixed tempo grid that triggers effects in time with a track.
 public struct SyncSettings: Codable, Hashable, Sendable {
@@ -188,6 +199,26 @@ public struct MoshRule: Identifiable, Codable, Hashable, Sendable {
     /// scramble with, and what Chance and Jitter roll with. Same seed, same
     /// render; a new seed is a new variation with nothing else changed.
     public var seed: UInt32
+    /// Force a clean keyframe the moment each of this effect's spans ends,
+    /// so the picture resets there instead of smearing on.
+    public var resetAfter: Bool = false
+    /// Spans dragged to a length of their own on the timeline, by shared
+    /// trigger (`triggerKey`), in seconds.
+    public var spanOverrides: [Int: Double] = [:]
+    /// Shared triggers this effect ignores, by `triggerKey` — removed from
+    /// this effect's lane without deleting them for every other effect.
+    public var excludedTriggers: Set<Int> = []
+
+    /// How long this effect runs for one trigger.
+    public func duration(for event: TriggerEvent) -> Double {
+        if event.ruleID == id { return event.duration ?? duration }
+        return spanOverrides[triggerKey(event.time)] ?? duration
+    }
+
+    /// Whether this trigger's span was given a length of its own.
+    public func hasOwnLength(_ event: TriggerEvent) -> Bool {
+        event.ruleID == id ? event.duration != nil : spanOverrides[triggerKey(event.time)] != nil
+    }
 
     public init(id: UUID = UUID(), enabled: Bool = true, kind: MoshOpKind,
                 source: TriggerSource, note: Int? = nil, band: OnsetBand? = nil,
@@ -221,6 +252,7 @@ public struct MoshRule: Identifiable, Codable, Hashable, Sendable {
         // A trigger placed on one effect's own lane is for that effect alone,
         // and is not gated by its painted spans: it was put exactly there.
         if let target = event.ruleID { return target == id }
+        if excludedTriggers.contains(triggerKey(event.time)) { return false }
         // Painted regions gate every source, a hand-placed trigger included: if
         // you drew where an effect is live, a trigger outside it should not
         // wake it up.
@@ -284,8 +316,9 @@ public enum TriggerCompiler {
                     if roll > rule.probability { continue }
                 }
 
-                var duration = rule.duration
-                if rule.durationJitter > 0 {
+                // A span dragged to its own length keeps exactly that length.
+                var duration = rule.duration(for: event)
+                if rule.durationJitter > 0 && !rule.hasOwnLength(event) {
                     let j = (Double(rng.next() % 2_000) / 1_000.0 - 1.0) * rule.durationJitter
                     duration *= max(0.1, 1.0 + j)
                 }
@@ -306,6 +339,7 @@ public enum TriggerCompiler {
                 var op = MoshOp(kind: rule.kind, startFrame: lo, length: hi - lo,
                                 amount: amount, seed: rng.next())
                 op.chain = chain
+                op.resetAfter = rule.resetAfter
                 ops.append(op)
             }
         }

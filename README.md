@@ -127,13 +127,24 @@ in both: in frames-first order the vector effects' heal points reset their own
 damage and leave the frame effects' alone, since a keyframe there is a clean
 copy of already-moshed pixels.
 
-### Where each effect is live
+### Lanes, lengths and resets
 
-Each effect gets its own lane on the timeline. A lane with nothing painted on
-it is live for the whole clip, which means every effect fires on every trigger.
-Drag across a lane to paint a span and that effect only fires on triggers
-inside it, so a set of effects takes turns over a clip. Double-click a span to
-remove it.
+Each effect gets its own lane on the timeline, with one bar per trigger it
+fires on — the frames it will actually rewrite. **Drag the end of a bar** to
+give that one span a length of its own (it is outlined to show it); the
+effect's Length still sets every other bar. **Right-click a bar** to remove
+that trigger from just this effect, delete it for every effect, or put its
+length back. Right-click a tick above the lanes to delete that trigger. A
+deleted onset or grid hit stays deleted when detection or tempo changes.
+
+Turn on **Reset after** in an effect and a clean keyframe is forced the moment
+each of its spans ends, so the picture snaps back instead of smearing on — the
+bar ends in a full-height cut. Smear does the same for every effect at once,
+after a delay.
+
+`beyglactl --live` can still restrict an effect to time spans from the command
+line; the app no longer paints them, since spans and bar lengths fought over
+the same drag.
 
 ---
 
@@ -434,9 +445,9 @@ mapping would spend most of the slider's length on zoom levels nobody uses.
 On a trackpad, **pinch to zoom** — the window narrows around wherever your
 fingers are, so the moment you are looking at stays under them rather than the
 view recentring on the whole clip — and **swipe with two fingers to pan**
-once zoomed in. Every gesture that already worked — click to scrub, drag to
-paint a span, double-click to place a trigger or clear a span — keeps working
-exactly as before; zoom only changes which slice of time those pixels map to.
+once zoomed in. Every other gesture — click to scrub, double-click to place a
+trigger, drag a bar's end, right-click to remove — keeps working exactly as
+before; zoom only changes which slice of time those pixels map to.
 
 ### Live — perform the mosh
 
@@ -549,7 +560,7 @@ Each effect's lane on the timeline is one row high until you click it. Open,
 it shows the shared triggers that reach it as faint stems and gives the effect
 triggers of its own: click to place one (higher is stronger), drag one to move
 it in time or change its strength, double-click to delete it. An effect's own
-triggers fire that effect alone, whatever its source or painted spans. Click
+triggers fire that effect alone, whatever its source. Click
 the lane's header strip to close it again.
 
 ### Effect controls

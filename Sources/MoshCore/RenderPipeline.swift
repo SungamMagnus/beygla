@@ -110,8 +110,9 @@ public final class RenderPipeline: @unchecked Sendable {
     }
 
     /// Seconds (relative to the start of the rendered range) at which to
-    /// force a clean keyframe: `smear` after the end of every op.
-    private func healTimes(_ request: RenderRequest, info: VideoInfo, smear: Double) -> [Double] {
+    /// force a clean keyframe: right where an op ends when its effect resets
+    /// after itself, otherwise `smear` after it (or never, without Smear).
+    private func healTimes(_ request: RenderRequest, info: VideoInfo, smear: Double?) -> [Double] {
         let base = request.trim?.lowerBound ?? 0
         let end = request.trim?.upperBound ?? info.duration
         let rate = info.frameRate
@@ -123,14 +124,17 @@ public final class RenderPipeline: @unchecked Sendable {
         }
         let ends = TriggerCompiler.compile(events: shifted, rules: request.rules,
                                            frameRate: rate, frameCount: frames,
-                                           seed: request.seed).map(\.endFrame)
+                                           seed: request.seed).map { ($0.endFrame, $0.resetAfter) }
             + VectorTriggerCompiler.compile(events: shifted, rules: request.vectorRules,
                                             frameRate: rate, frameCount: frames,
-                                            seed: request.seed).map(\.endFrame)
+                                            seed: request.seed).map { ($0.endFrame, $0.resetAfter) }
         // A hair early, so float error cannot push the forced keyframe onto
         // the frame after the one intended.
-        return ends.map { Double($0) / rate + smear - 0.001 }
-            .filter { $0 > 0.05 && $0 < Double(frames) / rate }
+        return ends.compactMap { end, reset -> Double? in
+            if reset { return Double(end) / rate - 0.001 }
+            return smear.map { Double(end) / rate + $0 - 0.001 }
+        }
+        .filter { $0 > 0.05 && $0 < Double(frames) / rate }
     }
 
     /// Encode → mosh → decode.
@@ -185,10 +189,8 @@ public final class RenderPipeline: @unchecked Sendable {
         // strips a keyframe outside an op's own range, so each heal keyframe
         // survives and resets the picture — unless a later effect covers it,
         // in which case that effect's smear carries on, as it should.
-        if let smear = request.smear {
-            opts.keyframeTimes = (opts.keyframeTimes + healTimes(request, info: info, smear: smear))
-                .sorted()
-        }
+        opts.keyframeTimes = (opts.keyframeTimes + healTimes(request, info: info, smear: request.smear))
+            .sorted()
 
         try tool.encodeMoshable(input: request.input, output: rawAVI, options: opts,
                                 token: token) { f in
@@ -266,13 +268,13 @@ public final class RenderPipeline: @unchecked Sendable {
         var finalAVI = moshedAVI
         if !request.vectorsFirst && !vectorOps.isEmpty {
             var heals: [Double] = []
-            if let smear = request.smear {
-                let rate = doc.frameRate
-                let length = Double(doc.frameCount) / rate
-                for op in vectorOps {
-                    let t: Double = Double(op.endFrame) / rate + smear - 0.001
-                    if t > 0.05 && t < length { heals.append(t) }
-                }
+            let rate = doc.frameRate
+            let length = Double(doc.frameCount) / rate
+            for op in vectorOps {
+                let after: Double? = op.resetAfter ? 0 : request.smear
+                guard let after else { continue }
+                let t: Double = Double(op.endFrame) / rate + after - 0.001
+                if t > 0.05 && t < length { heals.append(t) }
             }
             finalAVI = try vectorPass(from: moshedAVI, keyframes: heals.sorted())
         }

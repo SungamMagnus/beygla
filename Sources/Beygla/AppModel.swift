@@ -67,6 +67,7 @@ public final class AppModel: ObservableObject {
         events.removeAll { $0.source == .sync }
         guard let d = info?.duration, d > 0 else { return }
         events += SyncGrid.events(settings: syncSettings, duration: d)
+            .filter { !deletedTriggers.contains(triggerKey($0.time)) }
         events.sort { $0.time < $1.time }
     }
 
@@ -402,6 +403,7 @@ public final class AppModel: ObservableObject {
         previewURL = nil
         lastReport = nil
         events.removeAll()
+        deletedTriggers.removeAll()
 
         guard let tool else {
             loadError = FFmpegError.notInstalled.localizedDescription
@@ -485,6 +487,7 @@ public final class AppModel: ObservableObject {
             TriggerEvent(time: $0.time, strength: $0.strength,
                          source: .audio, band: onsetSettings.band)
         }
+        .filter { !deletedTriggers.contains(triggerKey($0.time)) }
         events.sort { $0.time < $1.time }
     }
 
@@ -572,6 +575,47 @@ public final class AppModel: ObservableObject {
 
     public func removeTrigger(_ id: UUID) {
         events.removeAll { $0.id == id }
+    }
+
+    /// Analysed onsets and grid hits deleted by hand, by `triggerKey`, so the
+    /// next re-analysis or tempo change does not bring them straight back.
+    private var deletedTriggers: Set<Int> = []
+
+    /// Delete a trigger outright — for every effect it reached.
+    public func deleteTrigger(_ id: UUID) {
+        guard let e = events.first(where: { $0.id == id }) else { return }
+        if e.ruleID == nil && (e.source == .audio || e.source == .sync) {
+            deletedTriggers.insert(triggerKey(e.time))
+        }
+        events.removeAll { $0.id == id }
+    }
+
+    /// Stop one effect firing on a shared trigger, leaving it for the rest.
+    public func excludeTrigger(_ event: TriggerEvent, from ruleID: UUID) {
+        let key = triggerKey(event.time)
+        if let i = rules.firstIndex(where: { $0.id == ruleID }) {
+            rules[i].excludedTriggers.insert(key)
+        } else if let i = vectorRules.firstIndex(where: { $0.id == ruleID }) {
+            vectorRules[i].excludedTriggers.insert(key)
+        }
+    }
+
+    /// Give one trigger's span on one effect a length of its own, or with
+    /// nil hand it back to the effect's Length.
+    public func setSpanLength(_ length: Double?, for event: TriggerEvent, on ruleID: UUID) {
+        let frame = 1 / max(info?.frameRate ?? 30, 1)
+        let len = length.map { min(max($0, frame), 6) }
+        if event.ruleID == ruleID {
+            guard let i = events.firstIndex(where: { $0.id == event.id }) else { return }
+            events[i].duration = len
+            return
+        }
+        let key = triggerKey(event.time)
+        if let i = rules.firstIndex(where: { $0.id == ruleID }) {
+            rules[i].spanOverrides[key] = len
+        } else if let i = vectorRules.firstIndex(where: { $0.id == ruleID }) {
+            vectorRules[i].spanOverrides[key] = len
+        }
     }
 
     /// Called when an effect is deleted, so its own triggers go with it.

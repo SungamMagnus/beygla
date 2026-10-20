@@ -230,12 +230,11 @@ struct RuleRow: View {
 
                 Spacer()
 
-                Text(rule.activeRegions.isEmpty
-                     ? "ALWAYS"
-                     : "\(rule.activeRegions.count) SPAN\(rule.activeRegions.count == 1 ? "" : "S")")
-                    .font(Sungam.mono(Sungam.text2xs))
-                    .foregroundStyle(rule.activeRegions.isEmpty ? Sungam.ink38
-                                                                : rule.kind.signalColor)
+                if rule.resetAfter {
+                    Text("RESETS")
+                        .font(Sungam.mono(Sungam.text2xs))
+                        .foregroundStyle(rule.kind.signalColor)
+                }
 
                 Text(String(format: "%.0fMS", rule.duration * 1000))
                     .font(Sungam.mono(Sungam.text2xs))
@@ -300,8 +299,7 @@ struct RuleRow: View {
                 }
 
                 RuleTriggerSection(source: $rule.source, band: $rule.band, note: $rule.note,
-                                   hasSpans: !rule.activeRegions.isEmpty,
-                                   clearSpans: { rule.activeRegions.removeAll() },
+                                   resetAfter: $rule.resetAfter,
                                    lastNote: lastNote, color: rule.kind.signalColor,
                                    onMoveUp: onMoveUp, onMoveDown: onMoveDown)
 
@@ -318,14 +316,13 @@ struct RuleRow: View {
 }
 
 /// The middle of an open effect: which source it listens to, the band or
-/// note within that source, whether it is painted onto spans, and where it
-/// sits in the chain. Shared by both kinds of effect row.
+/// note within that source, whether it resets the picture when each span
+/// ends, and where it sits in the chain. Shared by both kinds of effect row.
 struct RuleTriggerSection: View {
     @Binding var source: TriggerSource
     @Binding var band: OnsetBand?
     @Binding var note: Int?
-    var hasSpans: Bool
-    var clearSpans: () -> Void
+    @Binding var resetAfter: Bool
     var lastNote: Int?
     var color: Color
     var onMoveUp: (() -> Void)?
@@ -351,12 +348,11 @@ struct RuleTriggerSection: View {
                     LatchButton(label: "Learn", enabled: lastNote != nil) { note = lastNote }
                     LatchButton(label: "Any") { note = nil }
                 }
-                if hasSpans {
-                    Text("Painted spans only")
-                        .font(Sungam.mono(Sungam.text2xs))
-                        .foregroundStyle(color)
-                    LatchButton(label: "Always", action: clearSpans)
-                }
+                // A clean keyframe right where each span ends: the effect
+                // stops cleanly instead of smearing on until something else
+                // repaints the picture.
+                Latch(label: "Reset after", on: $resetAfter, color: color, width: 84)
+                    .help("Snap back to the clean picture the moment each of this effect's spans ends")
                 Spacer()
                 LatchButton(label: "↑ Earlier", enabled: onMoveUp != nil) { onMoveUp?() }
                 LatchButton(label: "↓ Later", enabled: onMoveDown != nil) { onMoveDown?() }
@@ -426,12 +422,11 @@ struct VectorRuleRow: View {
 
                 Spacer()
 
-                Text(rule.activeRegions.isEmpty
-                     ? "ALWAYS"
-                     : "\(rule.activeRegions.count) SPAN\(rule.activeRegions.count == 1 ? "" : "S")")
-                    .font(Sungam.mono(Sungam.text2xs))
-                    .foregroundStyle(rule.activeRegions.isEmpty ? Sungam.ink38
-                                                                : rule.kind.signalColor)
+                if rule.resetAfter {
+                    Text("RESETS")
+                        .font(Sungam.mono(Sungam.text2xs))
+                        .foregroundStyle(rule.kind.signalColor)
+                }
 
                 Text(String(format: "%.0fMS", rule.duration * 1000))
                     .font(Sungam.mono(Sungam.text2xs))
@@ -497,8 +492,7 @@ struct VectorRuleRow: View {
                 }
 
                 RuleTriggerSection(source: $rule.source, band: $rule.band, note: $rule.note,
-                                   hasSpans: !rule.activeRegions.isEmpty,
-                                   clearSpans: { rule.activeRegions.removeAll() },
+                                   resetAfter: $rule.resetAfter,
                                    lastNote: lastNote, color: rule.kind.signalColor,
                                    onMoveUp: onMoveUp, onMoveDown: onMoveDown)
 

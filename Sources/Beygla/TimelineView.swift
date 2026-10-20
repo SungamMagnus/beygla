@@ -53,27 +53,45 @@ private enum LaneRule: Identifiable {
         case .vector(let r): return r.duration
         }
     }
+    func duration(for e: TriggerEvent) -> Double {
+        switch self {
+        case .bitstream(let r): return r.duration(for: e)
+        case .vector(let r): return r.duration(for: e)
+        }
+    }
+    func hasOwnLength(_ e: TriggerEvent) -> Bool {
+        switch self {
+        case .bitstream(let r): return r.hasOwnLength(e)
+        case .vector(let r): return r.hasOwnLength(e)
+        }
+    }
+    var resetAfter: Bool {
+        switch self {
+        case .bitstream(let r): return r.resetAfter
+        case .vector(let r): return r.resetAfter
+        }
+    }
 }
 
 /// Waveform and onset curve on top, one lane per enabled effect underneath.
 ///
-/// The lanes are the point of the view. A rule with no painted span is live for
-/// the whole clip, which means every effect fires on every trigger; paint spans
-/// and the effects take turns instead. Everything the render will do is visible
-/// here — each tick is a trigger, each solid bar is frames that will actually be
-/// rewritten, and the tint behind them is where that effect is listening.
+/// The lanes are the point of the view. Everything the render will do is
+/// visible here — each tick is a trigger, each solid bar is frames that will
+/// actually be rewritten. Drag a bar's end to give that span its own length;
+/// right-click a tick or a bar to remove it.
 struct TimelineView: View {
     @EnvironmentObject var model: AppModel
 
-    /// An in-progress paint, held until the drag ends.
-    private enum PaintKind { case bitstream, vector }
     private enum Marker { case inPoint, outPoint }
     /// An in or out flag being dragged.
     @State private var markerDrag: Marker?
-    @State private var hoveringMarker = false
-    @State private var paint: (ruleID: UUID, kind: PaintKind, from: Double, to: Double)?
+    /// Whether the pointer is over something that drags sideways — a flag
+    /// or a bar's end — and so shows the resize cursor.
+    @State private var hoveringResize = false
     /// One of a lane's own triggers being dragged.
     @State private var triggerDrag: UUID?
+    /// A bar whose end is being dragged to a new length.
+    @State private var spanDrag: (event: TriggerEvent, ruleID: UUID)?
 
     private let waveH: Double = 96
     private let rowH: Double = 17
@@ -132,7 +150,8 @@ struct TimelineView: View {
                     // Two fingers moving left uncovers content further along
                     // in time — the window should advance to meet them.
                     model.panTimeline(bySeconds: deltaX * secondsPerPoint)
-                }
+                },
+                onRightClick: { p in contextItems(at: p, width: w) }
             ) {
                 Canvas { ctx, size in
                     drawGrid(ctx, size: size)
@@ -149,18 +168,11 @@ struct TimelineView: View {
                     let t = time(at: p.x, width: w)
                     if p.y < laneY {
                         model.addManualTrigger(at: t)
-                    } else if let slot = slot(at: p.y) {
-                        // On an open lane, double-clicking one of its own
-                        // triggers deletes it; anywhere else in a lane,
-                        // double-clicking inside a span removes the span.
-                        if slot.open, let id = ownTrigger(at: p, in: slot, width: w) {
-                            model.removeTrigger(id)
-                            return
-                        }
-                        switch slot.rule {
-                        case .bitstream(let r): model.removeRegion(from: r.id, at: t)
-                        case .vector(let r): model.removeVectorRegion(from: r.id, at: t)
-                        }
+                    } else if let slot = slot(at: p.y), slot.open,
+                              let id = ownTrigger(at: p, in: slot, width: w) {
+                        // Double-clicking one of an open lane's own triggers
+                        // deletes it.
+                        model.removeTrigger(id)
                     }
                 }
                 .onTapGesture(count: 1) { p in
@@ -186,8 +198,8 @@ struct TimelineView: View {
                     DragGesture(minimumDistance: 3)
                         .onChanged { g in
                             // A drag that starts on a flag moves that flag and
-                            // nothing else — checked before scrub and paint.
-                            if markerDrag == nil, paint == nil,
+                            // nothing else — checked before anything else.
+                            if markerDrag == nil, spanDrag == nil, triggerDrag == nil,
                                let m = marker(at: g.startLocation, width: w) {
                                 markerDrag = m
                             }
@@ -202,7 +214,19 @@ struct TimelineView: View {
                             // A drag that starts on one of an open lane's own
                             // triggers moves it: sideways in time, up and
                             // down in strength.
-                            if triggerDrag == nil, paint == nil,
+                            // A drag that starts on the end of a bar sets that
+                            // one span's length.
+                            if spanDrag == nil, triggerDrag == nil,
+                               let hit = barEnd(at: g.startLocation, width: w) {
+                                spanDrag = hit
+                            }
+                            if let d = spanDrag {
+                                let start = d.event.time + (lanes.first { $0.id == d.ruleID }?.offset ?? 0)
+                                model.setSpanLength(time(at: g.location.x, width: w) - start,
+                                                    for: d.event, on: d.ruleID)
+                                return
+                            }
+                            if triggerDrag == nil,
                                let slot = slot(at: g.startLocation.y), slot.open,
                                let id = ownTrigger(at: g.startLocation, in: slot, width: w) {
                                 triggerDrag = id
@@ -212,34 +236,23 @@ struct TimelineView: View {
                                                   strength: strength(at: g.location.y, in: slot))
                                 return
                             }
-                            if let p = paint {
-                                paint = (p.ruleID, p.kind, p.from, time(at: g.location.x, width: w))
-                            } else if g.startLocation.y < laneY {
+                            if g.startLocation.y < laneY {
                                 model.seek(to: time(at: g.location.x, width: w))
-                            } else if let rule = slot(at: g.startLocation.y)?.rule {
-                                let kind: PaintKind = { if case .vector = rule { return .vector }; return .bitstream }()
-                                paint = (rule.id, kind,
-                                         time(at: g.startLocation.x, width: w),
-                                         time(at: g.location.x, width: w))
                             }
                         }
                         .onEnded { _ in
                             markerDrag = nil
                             triggerDrag = nil
-                            if let p = paint {
-                                switch p.kind {
-                                case .bitstream: model.addRegion(to: p.ruleID, from: p.from, to: p.to)
-                                case .vector: model.addVectorRegion(to: p.ruleID, from: p.from, to: p.to)
-                                }
-                            }
-                            paint = nil
+                            spanDrag = nil
                         }
                 )
                 .onContinuousHover { phase in
                     let over: Bool
-                    if case .active(let p) = phase { over = marker(at: p, width: w) != nil } else { over = false }
-                    if over != hoveringMarker {
-                        hoveringMarker = over
+                    if case .active(let p) = phase {
+                        over = marker(at: p, width: w) != nil || barEnd(at: p, width: w) != nil
+                    } else { over = false }
+                    if over != hoveringResize {
+                        hoveringResize = over
                         if over { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
                     }
                 }
@@ -321,6 +334,64 @@ struct TimelineView: View {
     /// the bar of rewritten frames along the bottom.
     private func bodyRect(_ slot: LaneSlot, _ width: Double) -> CGRect {
         CGRect(x: 0, y: slot.y + headerH, width: width, height: slot.h - headerH - 12)
+    }
+
+    /// The bar whose right end is under a point: the trigger and the effect,
+    /// for dragging that one span to a new length.
+    private func barEnd(at p: CGPoint, width: Double) -> (event: TriggerEvent, ruleID: UUID)? {
+        guard let slot = slot(at: p.y) else { return nil }
+        let rule = slot.rule
+        let px = Double(p.x)
+        return model.events
+            .filter { rule.matches($0) }
+            .map { e in (e, abs(x(e.time + rule.offset + rule.duration(for: e), width) - px)) }
+            .filter { $0.1 <= 4 }
+            .min { $0.1 < $1.1 }
+            .map { ($0.0, rule.id) }
+    }
+
+    /// The trigger a right-click is about: on a lane, the one whose bar (or
+    /// stem) is under the pointer; above the lanes, the nearest tick.
+    private func contextItems(at p: CGPoint, width: Double) -> [(title: String, action: () -> Void)] {
+        let px = Double(p.x)
+        func when(_ e: TriggerEvent) -> String { String(format: "%.2fs", e.time) }
+
+        if Double(p.y) < laneY {
+            guard let e = model.events
+                .filter({ $0.ruleID == nil })
+                .map({ ($0, abs(x($0.time, width) - px)) })
+                .filter({ $0.1 <= 5 })
+                .min(by: { $0.1 < $1.1 })?.0 else { return [] }
+            return [("Delete trigger at \(when(e))", { model.deleteTrigger(e.id) })]
+        }
+
+        guard let slot = slot(at: p.y) else { return [] }
+        let rule = slot.rule
+        guard let e = model.events
+            .filter({ rule.matches($0) })
+            .map({ e -> (TriggerEvent, Double) in
+                let x0 = x(e.time + rule.offset, width) - 4
+                let x1 = x(e.time + rule.offset + rule.duration(for: e), width) + 4
+                let d = px < x0 ? x0 - px : px > x1 ? px - x1 : 0
+                return (e, d)
+            })
+            .filter({ $0.1 == 0 })
+            .min(by: { abs(x($0.0.time, width) - px) < abs(x($1.0.time, width) - px) })?.0
+        else { return [] }
+
+        var items: [(title: String, action: () -> Void)] = []
+        if e.ruleID == rule.id {
+            items.append(("Delete trigger at \(when(e))", { model.removeTrigger(e.id) }))
+        } else {
+            items.append(("Remove from \(rule.displayName)", { model.excludeTrigger(e, from: rule.id) }))
+            items.append(("Delete trigger at \(when(e)) for every effect", { model.deleteTrigger(e.id) }))
+        }
+        if rule.hasOwnLength(e) {
+            items.append(("-", {}))
+            items.append(("Reset length to \(String(format: "%.0f", rule.duration * 1000)) ms",
+                          { model.setSpanLength(nil, for: e, on: rule.id) }))
+        }
+        return items
     }
 
     private func strength(at y: CGFloat, in slot: LaneSlot) -> Double {
@@ -418,54 +489,43 @@ struct TimelineView: View {
             // The lane itself.
             ctx.fill(Path(rect), with: .color(Sungam.ink.opacity(slot.open ? 0.06 : 0.035)))
 
-            let live = rule.activeRegions.isEmpty
-            if live {
-                // No spans painted: the effect is listening the whole way.
-                ctx.fill(Path(rect), with: .color(color.opacity(0.10)))
-            } else {
-                for region in rule.activeRegions {
-                    let r = CGRect(x: x(region.start, size.width), y: rect.minY,
-                                   width: max(2, x(region.end, size.width)
-                                                 - x(region.start, size.width)),
-                                   height: rect.height)
-                    ctx.fill(Path(r), with: .color(color.opacity(0.20)))
-                    ctx.stroke(Path(r), with: .color(color.opacity(0.55)),
-                               lineWidth: Sungam.hairline)
-                }
-            }
-
-            // The span currently being dragged out.
-            if let p = paint, p.ruleID == rule.id {
-                let r = CGRect(x: x(min(p.from, p.to), size.width), y: rect.minY,
-                               width: max(2, abs(x(p.to, size.width) - x(p.from, size.width))),
-                               height: rect.height)
-                ctx.fill(Path(r), with: .color(color.opacity(0.32)))
-                ctx.stroke(Path(r), with: .color(color), lineWidth: Sungam.borderDefault)
-            }
+            ctx.fill(Path(rect), with: .color(color.opacity(0.08)))
 
             // The frames this rule will actually rewrite, and — when Smear is
             // set — a faint tail for how long the damage lingers after. Open,
             // they run along the lane's foot under the trigger stems.
             let barY = slot.open ? rect.maxY - 10 : rect.minY + 3
             let barH = slot.open ? 7.0 : rect.height - 6
+            // A span with a length of its own is outlined; an effect that
+            // resets after itself ends each bar with a full-height cut.
             for event in model.events where rule.matches(event) {
+                let len = rule.duration(for: event)
                 let x0 = x(event.time + rule.offset, size.width)
-                let x1 = x(event.time + rule.offset + rule.duration, size.width)
-                if let smear = model.smear, smear > 0 {
-                    let x2 = x(event.time + rule.offset + rule.duration + smear, size.width)
+                let x1 = x(event.time + rule.offset + len, size.width)
+                if rule.resetAfter {
+                    var cut = Path()
+                    cut.move(to: CGPoint(x: x1, y: rect.minY))
+                    cut.addLine(to: CGPoint(x: x1, y: rect.maxY))
+                    ctx.stroke(cut, with: .color(Sungam.ink70), lineWidth: 1.5)
+                } else if let smear = model.smear, smear > 0 {
+                    let x2 = x(event.time + rule.offset + len + smear, size.width)
                     ctx.fill(Path(CGRect(x: x1, y: barY + barH * 0.3,
                                          width: max(1, x2 - x1), height: barH * 0.4)),
                              with: .color(color.opacity(0.28)))
                 }
                 let bar = CGRect(x: x0, y: barY, width: max(1.5, x1 - x0), height: barH)
                 ctx.fill(Path(bar), with: .color(color))
+                if rule.hasOwnLength(event) {
+                    ctx.stroke(Path(bar.insetBy(dx: -1, dy: -1)), with: .color(Sungam.ink85),
+                               lineWidth: Sungam.hairline)
+                }
             }
 
             if slot.open { drawOpenLane(ctx, slot: slot, size: size) }
 
             let own = model.events.filter { $0.ruleID == rule.id }.count
             let label = (slot.open ? "▾ " : "▸ ") + rule.displayName.uppercased()
-                + (live ? "  ALWAYS" : "") + (own > 0 ? "  \(own) OWN" : "")
+                + (rule.resetAfter ? "  RESETS" : "") + (own > 0 ? "  \(own) OWN" : "")
             ctx.draw(Text(label)
                         .font(Sungam.mono(Sungam.text2xs, weight: slot.open ? .bold : .regular))
                         .foregroundStyle(slot.open ? Sungam.ink85 : Sungam.ink62),

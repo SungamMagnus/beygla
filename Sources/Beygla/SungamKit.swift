@@ -353,7 +353,7 @@ struct DropdownLatch<T: Hashable>: View {
     }
 }
 
-private final class ClosureMenuItem: NSMenuItem {
+final class ClosureMenuItem: NSMenuItem {
     private let handler: () -> Void
 
     init(title: String, handler: @escaping () -> Void) {
