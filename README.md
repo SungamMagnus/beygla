@@ -130,8 +130,15 @@ copy of already-moshed pixels.
 ### Lanes, lengths and resets
 
 Each effect gets its own lane on the timeline, with one bar per trigger it
-fires on — the frames it will actually rewrite. **Drag the end of a bar** to
-give that one span a length of its own (it is outlined to show it); the
+fires on — the frames it will actually rewrite. **Click a block** to select
+it — Shift- or ⌘-click to add more, or drag a box over empty lane space to
+select every block it touches. Drag any selected block to move them all
+together, or drag a block's start or end grip to trim it. **Delete** or
+**Backspace** removes the selection (Escape lets go of it), as does
+right-clicking one of the selected blocks. Moving or
+trimming the start of a shared trigger's block turns it into a trigger of that
+effect's own, so no other effect's lane changes. **Drag the end of any block**
+to give that one span a length of its own (it is outlined to show it); the
 effect's Length still sets every other bar. **Right-click a bar** to remove
 that trigger from just this effect, delete it for every effect, or put its
 length back. Right-click a tick above the lanes to delete that trigger. A
@@ -445,9 +452,9 @@ mapping would spend most of the slider's length on zoom levels nobody uses.
 On a trackpad, **pinch to zoom** — the window narrows around wherever your
 fingers are, so the moment you are looking at stays under them rather than the
 view recentring on the whole clip — and **swipe with two fingers to pan**
-once zoomed in. Every other gesture — click to scrub, double-click to place a
-trigger, drag a bar's end, right-click to remove — keeps working exactly as
-before; zoom only changes which slice of time those pixels map to.
+once zoomed in — the timeline moves with your fingers, following the
+system's natural-scrolling setting. Every other gesture keeps working exactly
+as before; zoom only changes which slice of time those pixels map to.
 
 ### Live — perform the mosh
 
@@ -460,8 +467,17 @@ before; zoom only changes which slice of time those pixels map to.
 
 ### By hand
 
-Double-click anywhere on the timeline to place a trigger at that point. A
-hand-placed trigger is an explicit instruction, so it fires **every** enabled
+The timeline has three kinds of track: the **waveform** at the top, which
+only scrubs; the **Triggers** track under it; and one lane per effect. The
+Triggers track works like an effect lane — click empty space to place a
+trigger (higher is stronger), click a trigger to select it, Shift- or ⌘-click
+or drag a box to select more (a box can take in triggers and effect blocks
+together), drag to move, Delete or Backspace to remove. Selecting a trigger
+outlines every block it sets off, in every lane. Moving a detected onset or
+grid hit pins it: it keeps firing the effects it did, and re-analysis or a
+tempo change leaves it where you put it.
+
+A hand-placed trigger is an explicit instruction, so it fires **every** enabled
 effect regardless of what those effects are otherwise listening to — filtering
 it by source would mean a trigger you placed yourself drew a tick and then did
 nothing.
@@ -556,12 +572,14 @@ on. The inspector on the right is only what happens to the frames: Stream,
 then Effects, then Vector effects. Each effect family is one row of
 equal-width chips; a lit corner marks one already in the chain.
 
-Each effect's lane on the timeline is one row high until you click it. Open,
+Each effect's lane on the timeline is one row high until you click its name in the column on the left (or empty space in the lane). Open,
 it shows the shared triggers that reach it as faint stems and gives the effect
-triggers of its own: click to place one (higher is stronger), drag one to move
-it in time or change its strength, double-click to delete it. An effect's own
+triggers of its own: click to place one (higher is stronger), drag its handle
+to move it in time or change its strength, right-click it to delete it. Open
+lanes shade each block by its trigger's strength, and every block starts with
+a darker tab of its effect's colour. An effect's own
 triggers fire that effect alone, whatever its source. Click
-the lane's header strip to close it again.
+its name (or the lane's header strip) to close it again.
 
 ### Effect controls
 
@@ -577,8 +595,11 @@ stopped to fully reversed.
 Vibrate, or any effect with Chance below 1 or Jitter above 0. Click it for a
 new variation with nothing else changed.
 
-Vector effects add **Decay**, which fades Amount across the span instead of
-cutting off at its end, and their own settings: Axis for Mirror and Vibrate,
+Vector effects add **Decay**, which slows the effect across a long span: at 0
+every frame gets the full push, so a long Zoom flies the picture out of frame
+and starts to look like a fast loop; at 1 a span of any length moves only as
+far in total as a short burst would, spread evenly, easing off toward its end.
+They also have their own settings: Axis for Mirror and Vibrate,
 Direction for Shift, a Centre for Zoom, Slam Zoom and Shear (type it, or press
 *Pick* and click the picture), Feedback for Delay, and Threshold for Noise.
 

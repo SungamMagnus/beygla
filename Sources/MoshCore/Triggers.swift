@@ -36,6 +36,11 @@ public struct TriggerEvent: Identifiable, Codable, Hashable, Sendable {
     /// a length of its own. Only for a lane's own triggers; a shared
     /// trigger's length per effect lives on the rule (`spanOverrides`).
     public var duration: Double?
+    /// Moved by hand. An analysed onset or grid hit that has been dragged
+    /// somewhere else keeps its source — so it still fires the same effects
+    /// — but survives re-analysis and tempo changes instead of being
+    /// regenerated back where it was.
+    public var pinned: Bool = false
 
     public init(id: UUID = UUID(), time: Double, strength: Double = 1.0,
                 source: TriggerSource, note: Int? = nil, band: OnsetBand? = nil,

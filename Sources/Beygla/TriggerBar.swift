@@ -24,7 +24,7 @@ struct TriggerBar: View {
             case .audio: audio
             case .midi: midi
             case .sync: sync
-            case .manual: hint("Double-click the timeline to place triggers by hand.")
+            case .manual: hint("Click the Triggers track to place triggers by hand.")
             }
 
             Spacer(minLength: 8)
@@ -199,7 +199,7 @@ struct TriggerBar: View {
         case .sync:
             return "Triggers on a fixed tempo grid. Set the BPM and note length, then put beat 1 where the track's downbeat falls."
         case .manual:
-            return "Double-click the timeline to place triggers by hand."
+            return "Click the Triggers track to place triggers by hand."
         }
     }
 }

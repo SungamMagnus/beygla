@@ -25,10 +25,20 @@ public enum VectorEngine {
             guard lo < hi else { continue }
             let params = "[" + op.params.map { String($0) }.joined(separator: ",") + "]"
             for i in lo ..< hi {
-                // Decay fades Amount toward nothing across the span — toward
-                // the neutral middle for the bipolar effects.
+                // Decay slows the effect down across a long span. A vector
+                // effect acts on every frame of its span at full strength, so
+                // over a few seconds Zoom flew the picture out of frame in a
+                // fraction of one and then kept re-zooming what was left — a
+                // fast loop. Decay spreads the motion out: at 1 a span of any
+                // length moves only as far in total as a short burst of
+                // `burst` frames would, evenly; at 0 every frame is full
+                // strength, as before. It also eases off a little toward the
+                // end of the span, so the effect still dies away. Bipolar
+                // effects scale toward their neutral middle.
+                let burst = 8.0
+                let spread = pow(burst / max(burst, Double(op.length)), op.decay)
                 let progress = op.length > 1 ? Double(i - op.startFrame) / Double(op.length - 1) : 0
-                let f = 1 - op.decay * progress
+                let f = spread * (1 - 0.5 * op.decay * progress)
                 let amount = op.kind.isBipolar ? 0.5 + (op.amount - 0.5) * f : op.amount * f
                 // The seed goes in as 31 bits. ffedit's QuickJS saturates a
                 // larger number to 2147483647 when it converts it to an

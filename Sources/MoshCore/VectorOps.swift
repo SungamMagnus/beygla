@@ -175,7 +175,7 @@ public struct VectorOp: Codable, Identifiable, Hashable, Sendable {
     /// The effect's own settings beyond Amount, in the order its script
     /// function reads them (axis, direction, centre, feedback, threshold).
     public var params: [Double] = []
-    /// 0...1: how far Amount fades toward nothing by the end of the span.
+    /// 0...1: how slowly the op moves across its span (see `VectorRule.decay`).
     public var decay: Double = 0
     /// A clean keyframe is forced where this op ends.
     public var resetAfter: Bool = false
@@ -213,8 +213,9 @@ public struct VectorRule: Identifiable, Codable, Hashable, Sendable {
     /// See `MoshRule.seed`. Vibrate shakes with it; Chance and Jitter roll
     /// with it.
     public var seed: UInt32 = 1
-    /// 0...1: how far Amount fades toward nothing across the span, so the
-    /// effect dies away instead of switching off at its end.
+    /// 0...1: how slowly the effect moves across a long span — at 1 the
+    /// whole span moves only as far as a short burst would — easing off a
+    /// little toward its end. See `VectorEngine.generateScript`.
     public var decay: Double = 0
     /// Mirror: which way to reflect. Vibrate: which way to shake.
     public var axis: MotionAxis = .horizontal

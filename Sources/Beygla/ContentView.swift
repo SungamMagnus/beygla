@@ -369,7 +369,7 @@ struct ContentView: View {
                 LabelValue(label: "Took", value: String(format: "%.1fs", r.duration),
                            color: Sungam.ink62, size: Sungam.text2xs)
             } else {
-                Text("Double-click to add a trigger · drag a lane to paint · pinch to zoom")
+                Text("Click the Triggers track to add · drag a box to select · pinch to zoom")
                     .font(Sungam.mono(Sungam.text2xs))
                     .foregroundStyle(Sungam.ink38)
                     .lineLimit(1)

@@ -64,7 +64,7 @@ public final class AppModel: ObservableObject {
     /// Only `.sync` events are touched — analysed onsets, hand-placed
     /// triggers and anything captured live stay where they are.
     public func regenerateSyncEvents() {
-        events.removeAll { $0.source == .sync }
+        events.removeAll { $0.source == .sync && !$0.pinned }
         guard let d = info?.duration, d > 0 else { return }
         events += SyncGrid.events(settings: syncSettings, duration: d)
             .filter { !deletedTriggers.contains(triggerKey($0.time)) }
@@ -113,7 +113,8 @@ public final class AppModel: ObservableObject {
 
     private var keyMonitor: Any?
 
-    /// Space plays, I and O set the range.
+    /// Space plays, I and O set the range; Delete or Backspace removes the
+    /// selected timeline blocks and Escape lets go of them.
     ///
     /// These are a local event monitor rather than menu-item shortcuts. A
     /// bare-letter menu shortcut is matched before the focused view sees the
@@ -129,6 +130,13 @@ public final class AppModel: ObservableObject {
             let mods = event.modifierFlags.intersection([.command, .control, .option])
             guard mods.isEmpty else { return event }
             let handled: Bool = MainActor.assumeIsolated {
+                if !self.selectedBlocks.isEmpty {
+                    switch event.keyCode {
+                    case 51, 117: self.deleteSelectedBlocks(); return true   // ⌫, ⌦
+                    case 53: self.selectedBlocks.removeAll(); return true      // esc
+                    default: break
+                    }
+                }
                 switch event.charactersIgnoringModifiers?.lowercased() {
                 case " ": self.togglePlay(); return true
                 case "i": self.setInPoint(); return true
@@ -482,7 +490,7 @@ public final class AppModel: ObservableObject {
         // Replace only the analysed onsets. This used to reassign `events`
         // wholesale, so nudging the sensitivity knob wiped every hand-placed
         // and live-captured trigger along with them.
-        events.removeAll { $0.source == .audio && $0.band != nil }
+        events.removeAll { $0.source == .audio && $0.band != nil && !$0.pinned }
         events += onsets.map {
             TriggerEvent(time: $0.time, strength: $0.strength,
                          source: .audio, band: onsetSettings.band)
@@ -498,7 +506,7 @@ public final class AppModel: ObservableObject {
         isArmed = armed
         if armed {
             // Live hits replace analysed ones — you are performing the mosh now.
-            events.removeAll { $0.source == .audio && $0.band != nil }
+            events.removeAll { $0.source == .audio && $0.band != nil && !$0.pinned }
             if triggerSource == .audio { audioInput.start() }
             if triggerSource == .midi { midiInput.start() }
         } else {
@@ -526,9 +534,12 @@ public final class AppModel: ObservableObject {
         events.sort { $0.time < $1.time }
     }
 
-    public func addManualTrigger(at time: Double) {
-        events.append(TriggerEvent(time: time, strength: 1.0, source: .manual))
+    @discardableResult
+    public func addManualTrigger(at time: Double, strength: Double = 1.0) -> UUID {
+        let e = TriggerEvent(time: time, strength: min(max(strength, 0.05), 1), source: .manual)
+        events.append(e)
         events.sort { $0.time < $1.time }
+        return e.id
     }
 
     public func clearTriggers() { events.removeAll() }
@@ -598,6 +609,74 @@ public final class AppModel: ObservableObject {
         } else if let i = vectorRules.firstIndex(where: { $0.id == ruleID }) {
             vectorRules[i].excludedTriggers.insert(key)
         }
+    }
+
+    // MARK: - Block selection
+
+    /// The ruleID a `BlockRef` carries when it means a trigger itself, on the
+    /// Triggers track, rather than one effect's block.
+    public static let triggerTrack = UUID(uuidString: "00000000-0000-0000-0000-000000000000")!
+
+    /// Move a shared trigger. The first move of an analysed onset or grid
+    /// hit pins it and marks where it came from as deleted, so re-analysis
+    /// neither drags it back nor adds a second copy at the old place.
+    public func moveSharedTrigger(_ id: UUID, to time: Double) {
+        guard let i = events.firstIndex(where: { $0.id == id }) else { return }
+        if !events[i].pinned && (events[i].source == .audio || events[i].source == .sync) {
+            deletedTriggers.insert(triggerKey(events[i].time))
+            events[i].pinned = true
+        }
+        events[i].time = clampToClip(time)
+        events.sort { $0.time < $1.time }
+    }
+
+    /// One block on the timeline: a trigger as it lands on one effect — or,
+    /// with `triggerTrack` as its rule, the trigger itself.
+    public struct BlockRef: Hashable {
+        public let eventID: UUID
+        public let ruleID: UUID
+        public init(eventID: UUID, ruleID: UUID) { self.eventID = eventID; self.ruleID = ruleID }
+    }
+
+    /// The blocks selected on the timeline, for moving and deleting together.
+    @Published public var selectedBlocks: Set<BlockRef> = []
+
+    /// Delete every selected block. A block that is an effect's own trigger
+    /// goes; a shared trigger's block is taken off that one effect only, so
+    /// the other lanes it reaches keep it.
+    public func deleteSelectedBlocks() {
+        for ref in selectedBlocks {
+            guard let e = events.first(where: { $0.id == ref.eventID }) else { continue }
+            if ref.ruleID == Self.triggerTrack { deleteTrigger(e.id) }
+            else if e.ruleID == ref.ruleID { removeTrigger(e.id) }
+            else { excludeTrigger(e, from: ref.ruleID) }
+        }
+        selectedBlocks.removeAll()
+    }
+
+    /// Turn a shared trigger's block on one effect into a trigger of that
+    /// effect's own, at the same place and strength, so moving or trimming it
+    /// leaves every other effect where it was. Returns the own trigger's id;
+    /// a trigger that is already the effect's own comes straight back.
+    public func detach(_ event: TriggerEvent, for ruleID: UUID, length: Double?) -> UUID {
+        if event.ruleID == ruleID { return event.id }
+        excludeTrigger(event, from: ruleID)
+        var own = TriggerEvent(time: event.time, strength: event.strength,
+                               source: .manual, ruleID: ruleID)
+        own.duration = length
+        events.append(own)
+        events.sort { $0.time < $1.time }
+        return own.id
+    }
+
+    /// Place one of an effect's own triggers: where it starts, and its
+    /// length (nil keeps the effect's Length).
+    public func setTriggerSpan(_ id: UUID, time: Double, length: Double?) {
+        guard let i = events.firstIndex(where: { $0.id == id }) else { return }
+        let frame = 1 / max(info?.frameRate ?? 30, 1)
+        events[i].time = clampToClip(time)
+        events[i].duration = length.map { min(max($0, frame), 6) }
+        events.sort { $0.time < $1.time }
     }
 
     /// Give one trigger's span on one effect a length of its own, or with

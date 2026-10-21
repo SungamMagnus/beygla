@@ -84,6 +84,15 @@ enum Sungam {
     static let borderStrong: CGFloat = 1.4
 }
 
+extension Color {
+    /// The same hue, deeper — for a mark that has to read against a fill of
+    /// its own colour, such as the tab at the start of a timeline block.
+    func darker(_ fraction: Double = 0.45) -> Color {
+        let ns = NSColor(self).usingColorSpace(.sRGB) ?? NSColor(self)
+        return Color(nsColor: ns.blended(withFraction: fraction, of: .black) ?? ns)
+    }
+}
+
 // MARK: - Wordmark
 
 /// Letter-spaced caps. Used for the product name and for section captions
